@@ -18,6 +18,9 @@ import {
 import type { GalleryMedia } from "@/lib/supabase/database.types";
 import { uploadMediaAction, loadMoreMediaAction } from "@/app/actions/gallery";
 
+// HEIC/HEIF cannot be rendered by browsers natively
+const BROWSER_UNRENDERABLE = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const ALL_CATEGORIES = [
@@ -254,6 +257,19 @@ function MediaCard({ media, onOpen, index }: {
             VIDEO
           </span>
         </div>
+      ) : BROWSER_UNRENDERABLE.has(media.mime_type ?? "") ? (
+        // HEIC/HEIF: browser can't render — show download card instead
+        <div className="relative aspect-square bg-faint flex flex-col items-center
+                        justify-center gap-2 group-hover:bg-faint/80 transition-colors p-4">
+          <div className="w-12 h-12 rounded-full bg-gold/10 border border-gold/30
+                          flex items-center justify-center">
+            <Download size={18} className="text-gold" />
+          </div>
+          <span className="font-mono text-[10px] text-gold/70">HEIC</span>
+          <span className="font-body text-[11px] text-muted/60 text-center">
+            Tap untuk download
+          </span>
+        </div>
       ) : (
         <div className="relative overflow-hidden">
           <Image
@@ -362,10 +378,10 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 
             <div>
               <label className="block font-mono text-[11px] text-muted mb-1.5">
-                FILE (Image / MP4) *
+                FILE (Foto & Video iPhone/Android) *
               </label>
               <input
-                name="file" type="file" accept="image/*,video/mp4"
+                name="file" type="file" accept="image/*,.heic,.heif,video/mp4,video/quicktime,.mov"
                 required
                 className="w-full text-sm text-muted
                            file:mr-3 file:py-1.5 file:px-3 file:rounded-lg

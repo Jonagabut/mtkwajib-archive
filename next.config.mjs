@@ -8,11 +8,14 @@ const nextConfig = {
         port: "",
         pathname: "/storage/v1/object/public/**",
       },
+      // Unsplash placeholders
+      { protocol: "https", hostname: "images.unsplash.com" },
     ],
   },
   experimental: {
     serverActions: {
-      bodySizeLimit: "50mb",
+      // Large enough for 500MB MOV videos from iPhone
+      bodySizeLimit: "600mb",
     },
   },
 };

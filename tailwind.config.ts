@@ -10,76 +10,66 @@ const config: Config = {
     extend: {
       fontFamily: {
         display: ["var(--font-playfair)", "Georgia", "serif"],
-        body: ["var(--font-dm-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-jetbrains)", "monospace"],
+        body:    ["var(--font-dm-sans)", "system-ui", "sans-serif"],
+        mono:    ["var(--font-jetbrains)", "monospace"],
       },
       colors: {
-        void: "#08080e",
-        surface: "#0f0f18",
-        card: "#16161f",
-        border: "#252535",
-        gold: {
-          DEFAULT: "#f5c842",
-          dim: "#c9a232",
-          glow: "#f5c84240",
+        // ── Deep navy dark theme ──────────────────────────────
+        void:    "#040c1e",   // deepest bg
+        surface: "#071428",   // section bg
+        card:    "#0b1c3a",   // card bg
+        border:  "#172e54",   // borders
+        faint:   "#0e1d36",   // subtle bg
+
+        // ── Primary accent: electric blue ─────────────────────
+        blue: {
+          DEFAULT: "#4d94ff",  // primary
+          dim:     "#2d73e8",  // hover / pressed
+          bright:  "#7ab4ff",  // highlight text
+          glow:    "#4d94ff30",
         },
+
+        // ── Supporting accents ────────────────────────────────
+        sky:     "#93c5fd",   // light blue text / tags
         coral: {
-          DEFAULT: "#e8856a",
-          dim: "#c4674e",
+          DEFAULT: "#ff7b6b",
+          dim:     "#e05a4a",
         },
-        lavender: "#9b8fd4",
-        ink: "#f0ece4",
-        muted: "#6b6b85",
-        faint: "#2a2a3a",
+        lavender: "#a78bfa",
+
+        // ── Text ──────────────────────────────────────────────
+        ink:   "#dce9ff",   // near-white with blue tint
+        muted: "#4a6fa5",   // muted blue-gray
+
+        // ── Legacy alias so old gold refs dont break ──────────
+        // redirect gold → blue.DEFAULT so any leftover @apply text-gold still works
+        gold: {
+          DEFAULT: "#4d94ff",
+          dim:     "#2d73e8",
+          glow:    "#4d94ff30",
+        },
       },
       boxShadow: {
-        "gold-glow": "0 0 40px #f5c84230, 0 0 80px #f5c84210",
-        "card-hover": "0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px #f5c84220",
-        "sticky-yellow": "4px 4px 0px #c9a232, 8px 8px 20px rgba(0,0,0,0.4)",
-        "sticky-pink": "4px 4px 0px #c4674e, 8px 8px 20px rgba(0,0,0,0.4)",
-        "sticky-lavender":
-          "4px 4px 0px #7a6faa, 8px 8px 20px rgba(0,0,0,0.4)",
+        "blue-glow":  "0 0 40px #4d94ff25, 0 0 80px #4d94ff10",
+        "card-hover": "0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px #4d94ff20",
+        "note-yellow":"4px 4px 0px #c9a232, 8px 8px 20px rgba(0,0,0,0.5)",
+        "note-pink":  "4px 4px 0px #c4674e, 8px 8px 20px rgba(0,0,0,0.5)",
+        "note-lav":   "4px 4px 0px #7a6faa, 8px 8px 20px rgba(0,0,0,0.5)",
+        "gold-glow":  "0 0 40px #4d94ff25, 0 0 80px #4d94ff10",
       },
       backgroundImage: {
-        "noise":
-          "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.05'/%3E%3C/svg%3E\")",
-        "grid-lines":
-          "linear-gradient(rgba(245,200,66,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(245,200,66,0.03) 1px, transparent 1px)",
+        "grid-lines": "linear-gradient(rgba(77,148,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(77,148,255,0.04) 1px, transparent 1px)",
       },
-      backgroundSize: {
-        grid: "60px 60px",
-      },
+      backgroundSize: { grid: "60px 60px" },
       animation: {
-        "grain": "grain 8s steps(10) infinite",
-        "float": "float 6s ease-in-out infinite",
-        "shimmer": "shimmer 2s linear infinite",
-        "countdown-tick": "countdown-tick 1s ease-in-out infinite",
+        float:  "float 6s ease-in-out infinite",
+        shimmer:"shimmer 2s linear infinite",
+        pulse2: "pulse2 3s ease-in-out infinite",
       },
       keyframes: {
-        grain: {
-          "0%, 100%": { transform: "translate(0, 0)" },
-          "10%": { transform: "translate(-5%, -10%)" },
-          "20%": { transform: "translate(-15%, 5%)" },
-          "30%": { transform: "translate(7%, -25%)" },
-          "40%": { transform: "translate(-5%, 25%)" },
-          "50%": { transform: "translate(-15%, 10%)" },
-          "60%": { transform: "translate(15%, 0%)" },
-          "70%": { transform: "translate(0%, 15%)" },
-          "80%": { transform: "translate(3%, 35%)" },
-          "90%": { transform: "translate(-10%, 10%)" },
-        },
-        float: {
-          "0%, 100%": { transform: "translateY(0px)" },
-          "50%": { transform: "translateY(-20px)" },
-        },
-        shimmer: {
-          "0%": { backgroundPosition: "-1000px 0" },
-          "100%": { backgroundPosition: "1000px 0" },
-        },
-        "countdown-tick": {
-          "0%, 100%": { transform: "scale(1)" },
-          "50%": { transform: "scale(1.05)" },
-        },
+        float:  { "0%, 100%": { transform: "translateY(0px)" }, "50%": { transform: "translateY(-12px)" } },
+        shimmer:{ "0%": { backgroundPosition: "-1000px 0" }, "100%": { backgroundPosition: "1000px 0" } },
+        pulse2: { "0%, 100%": { opacity: "0.6" }, "50%": { opacity: "1" } },
       },
     },
   },
