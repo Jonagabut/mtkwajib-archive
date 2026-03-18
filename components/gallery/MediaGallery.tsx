@@ -3,7 +3,7 @@
 // v4: static-first gallery — photos live in public/gallery/, no upload UI needed.
 // Lightbox: keyboard nav (←/→/Esc) + touch swipe + download.
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import Masonry from "react-masonry-css";
@@ -34,7 +34,7 @@ function Lightbox({ media, all, onClose, onNavigate }: {
   onNavigate: (dir: "prev" | "next") => void;
 }) {
   const [downloading, setDownloading] = useState(false);
-  const touchStartX = { current: null as number | null };
+  const touchStartX = useRef<number | null>(null);
   const currentIndex = all.findIndex((m) => m.id === media.id);
   const isLocal = media.storage_url.startsWith("/");
 
@@ -68,7 +68,16 @@ function Lightbox({ media, all, onClose, onNavigate }: {
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
       className="lightbox-overlay fixed inset-0 z-50 flex items-center justify-center bg-void/95"
-      onClick={onClose} onKeyDown={handleKeyDown} tabIndex={-1}
+      onClick={onClose}
+      onKeyDown={handleKeyDown}
+      onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+      onTouchEnd={(e) => {
+        if (touchStartX.current === null) return;
+        const d = e.changedTouches[0].clientX - touchStartX.current;
+        if (Math.abs(d) > 50) onNavigate(d < 0 ? "next" : "prev");
+        touchStartX.current = null;
+      }}
+      tabIndex={-1}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 16 }}
@@ -77,13 +86,6 @@ function Lightbox({ media, all, onClose, onNavigate }: {
         transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
         className="relative w-full max-w-5xl mx-4 flex flex-col gap-3 max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
-        onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
-        onTouchEnd={(e) => {
-          if (touchStartX.current === null) return;
-          const d = e.changedTouches[0].clientX - touchStartX.current;
-          if (Math.abs(d) > 50) onNavigate(d < 0 ? "next" : "prev");
-          touchStartX.current = null;
-        }}
       >
         {/* Top bar */}
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -241,7 +243,7 @@ function MediaCard({ media, onOpen, index }: {
           )}
         </div>
         {media.caption && (
-          <p className="mt-1.5 font-body text-xs text-muted line-clamp-2 capitalize">{media.caption}</p>
+          <p className="mt-1.5 font-body text-xs text-muted capitalize">{media.caption}</p>
         )}
       </div>
     </motion.div>

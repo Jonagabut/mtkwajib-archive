@@ -78,7 +78,7 @@ async function getLocalGallery(): Promise<GalleryMedia[]> {
             height:          null,
             file_size_bytes: fileStat.size,
             created_at:      fileStat.mtime.toISOString(),
-          } satisfies GalleryMedia;
+          } as GalleryMedia;
         })
     );
 

@@ -5,7 +5,9 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import Image from "next/image";
 import { ChevronDown, Music2 } from "lucide-react";
 
-const SPOTIFY_ID      = process.env.NEXT_PUBLIC_SPOTIFY_PLAYLIST_ID ?? "37i9dQZF1DXcBWIGoYBM5M";
+// Hardcoded playlist ID — ganti kalau mau pakai env var
+const SPOTIFY_ID = process.env.NEXT_PUBLIC_SPOTIFY_PLAYLIST_ID ?? "4r77VkJibxpLNchHBv1ZCy";
+const SPOTIFY_EMBED_URL = `https://open.spotify.com/embed/playlist/${SPOTIFY_ID}?utm_source=generator&theme=0`;
 const GRADUATION_YEAR = 2026;
 
 export default function HeroSection({ logoUrl }: { logoUrl: string | null }) {
@@ -117,8 +119,7 @@ export default function HeroSection({ logoUrl }: { logoUrl: string | null }) {
               )}
 
               <iframe
-                key={SPOTIFY_ID}
-                src={`https://open.spotify.com/embed/playlist/${SPOTIFY_ID}?utm_source=generator&theme=0`}
+                src={SPOTIFY_EMBED_URL}
                 width="100%"
                 height="80"
                 style={{ border: 0, display: spotifyLoaded ? "block" : "none" }}

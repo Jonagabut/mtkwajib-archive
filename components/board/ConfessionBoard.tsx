@@ -394,7 +394,7 @@ export default function ConfessionBoard({
             if (prev.some((n) => n.id === incoming.id)) return prev;
             return [incoming, ...prev];
           });
-          setNewNoteIds((prev) => new Set(Array.from(prev).concat(incoming.id)));
+          setNewNoteIds((prev) => new Set([...prev, incoming.id]));
           setTimeout(() => {
             setNewNoteIds((prev) => {
               const s = new Set(prev);
@@ -414,7 +414,7 @@ export default function ConfessionBoard({
       if (prev.some((n) => n.id === note.id)) return prev;
       return [note, ...prev];
     });
-    setNewNoteIds((prev) => new Set(Array.from(prev).concat(note.id)));
+    setNewNoteIds((prev) => new Set([...prev, note.id]));
     setTimeout(() => {
       setNewNoteIds((prev) => {
         const s = new Set(prev);
@@ -495,14 +495,18 @@ export default function ConfessionBoard({
           style={{
             maxHeight: "70vh",
             minHeight: "280px",
-            // Custom scrollbar matching the dark theme
             scrollbarWidth: "thin",
             scrollbarColor: "#4d94ff40 transparent",
-          }}
+            WebkitOverflowScrolling: "touch",
+          } as React.CSSProperties}
         >
           <div
-            className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 pb-8"
-            style={{ columnGap: "12px", padding: "4px 2px 32px" }}
+            className="columns-2 sm:columns-3 md:columns-4 lg:columns-5"
+            style={{
+              columnGap: "12px",
+              padding: "4px 2px 32px",
+              columnFill: "auto",  // fill top-to-bottom, enables proper scroll
+            }}
           >
             <AnimatePresence>
               {displayNotes.map((note) => (
