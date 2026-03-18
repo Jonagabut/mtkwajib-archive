@@ -45,6 +45,7 @@ export interface Database {
           class_number?: number | null;
           is_featured?: boolean;
         };
+        Relationships: [];
       };
       gallery_media: {
         Row: {
@@ -85,6 +86,7 @@ export interface Database {
           height?: number | null;
           file_size_bytes?: number | null;
         };
+        Relationships: [];
       };
       confessions: {
         Row: {
@@ -110,39 +112,16 @@ export interface Database {
           y_pos?: number;
           rotation_deg?: number;
         };
-      };
-      time_capsule: {
-        Row: {
-          id: string;
-          author_name: string | null;
-          content: string;
-          unlock_at: string;
-          created_at: string;
-        };
-        Insert: {
-          author_name?: string | null;
-          content: string;
-          unlock_at?: string;
-        };
-        Update: {
-          author_name?: string | null;
-          content?: string;
-          unlock_at?: string;
-        };
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
-    Functions: {
-      get_capsule_stats: {
-        Args: Record<string, never>;
-        Returns: Json;
-      };
-    };
+    Functions: Record<string, never>;
     Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 }
 
 export type Student = Database["public"]["Tables"]["students"]["Row"];
 export type GalleryMedia = Database["public"]["Tables"]["gallery_media"]["Row"];
 export type Confession = Database["public"]["Tables"]["confessions"]["Row"];
-export type TimeCapsuleEntry = Database["public"]["Tables"]["time_capsule"]["Row"];
