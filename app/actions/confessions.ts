@@ -1,45 +1,34 @@
 "use server";
-import { headers } from "next/headers";
 import { createAdminClient, validatePasscode } from "@/lib/supabase/server";
 import type { NoteColor } from "@/lib/supabase/database.types";
 
-// ─── Rate limiter ────────────────────────────────────────────────────────────
-// Simple in-memory store: keyed by IP, max 5 posts per 10-minute window.
-// This resets on each server restart (fine for a low-traffic yearbook site).
-interface RateBucket {
-  count: number;
-  resetAt: number;
-}
-const _rateBuckets = new Map<string, RateBucket>();
-const RATE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
-const RATE_MAX_POSTS = 5;
+// ─── Rate limit via DB ────────────────────────────────────────────────────────
+// In-memory rate limiters don't work on Vercel (stateless serverless).
+// Instead: count confessions in the last 10 minutes.
+// Since confessions are anonymous (no user ID), we limit per PASSCODE globally —
+// max 30 notes per 10 minutes total across all users.
+// This prevents bulk spam while still letting a whole class post freely.
 
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const bucket = _rateBuckets.get(ip);
+const RATE_WINDOW_MIN = 10;
+const RATE_MAX_GLOBAL = 30; // max notes per 10-min window globally
 
-  if (!bucket || now > bucket.resetAt) {
-    _rateBuckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
-    return true;
+async function checkGlobalRateLimit(): Promise<boolean> {
+  try {
+    const supabase = createAdminClient();
+    const since    = new Date(Date.now() - RATE_WINDOW_MIN * 60 * 1000).toISOString();
+    const { count, error } = await supabase
+      .from("confessions")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", since);
+
+    if (error) return true; // fail open — don't block if count query fails
+    return (count ?? 0) < RATE_MAX_GLOBAL;
+  } catch {
+    return true; // fail open
   }
-  if (bucket.count >= RATE_MAX_POSTS) return false;
-  bucket.count += 1;
-  return true;
 }
 
-// Periodically prune expired buckets so the map doesn't grow forever.
-// Called lazily on each action invocation.
-let _lastPrune = 0;
-function pruneRateBuckets() {
-  const now = Date.now();
-  if (now - _lastPrune < 60_000) return;
-  _lastPrune = now;
-  _rateBuckets.forEach((bucket, key) => {
-    if (now > bucket.resetAt) _rateBuckets.delete(key);
-  });
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface ActionResult {
   error?: string;
   data?: { id: string };
@@ -47,23 +36,11 @@ interface ActionResult {
 
 const VALID_COLORS: readonly NoteColor[] = ["yellow", "pink", "lavender"];
 
-// ─── Post confession ─────────────────────────────────────────────────────────
+// ─── Post confession ──────────────────────────────────────────────────────────
 export async function postConfessionAction(
   formData: FormData
 ): Promise<ActionResult> {
-  pruneRateBuckets();
-
-  // Rate limit by forwarded IP (Vercel sets x-forwarded-for)
-  const headersList = await headers();
-  const ip =
-    headersList.get("x-forwarded-for")?.split(",")[0].trim() ?? "anonymous";
-  if (!checkRateLimit(ip)) {
-    return {
-      error: `Slow down! Maksimum ${RATE_MAX_POSTS} notes per 10 menit.`,
-    };
-  }
-
-  // Passcode
+  // Passcode first — fast reject without hitting DB
   const passcode = formData.get("passcode") as string;
   if (!validatePasscode(passcode)) {
     return { error: "Passcode salah, bro." };
@@ -72,16 +49,22 @@ export async function postConfessionAction(
   // Content validation
   const content = (formData.get("content") as string)?.trim();
   if (!content || content.length === 0) return { error: "Tulis sesuatu dulu!" };
-  if (content.length > 300)
-    return { error: "Terlalu panjang. Maksimum 300 karakter." };
+  if (content.length > 300) return { error: "Terlalu panjang. Maksimum 300 karakter." };
 
   // Color validation
   const color = (formData.get("color") as NoteColor) || "yellow";
   if (!VALID_COLORS.includes(color)) return { error: "Warna tidak valid." };
 
-  // Random position — spread notes across a 600×400 virtual canvas
-  const x_pos = Math.random() * 560 + 40;
-  const y_pos = Math.random() * 380 + 40;
+  // Global rate limit check (DB-based, works on serverless)
+  const allowed = await checkGlobalRateLimit();
+  if (!allowed) {
+    return {
+      error: `Board lagi rame banget! Coba lagi dalam beberapa menit.`,
+    };
+  }
+
+  const x_pos       = Math.random() * 560 + 40;
+  const y_pos       = Math.random() * 380 + 40;
   const rotation_deg = (Math.random() - 0.5) * 10;
 
   const supabase = createAdminClient();
@@ -99,14 +82,15 @@ export async function postConfessionAction(
   return { data: { id: data.id } };
 }
 
-// ─── Update position ─────────────────────────────────────────────────────────
+// ─── Update position ──────────────────────────────────────────────────────────
 export async function updateConfessionPositionAction(
   id: string,
   x_pos: number,
   y_pos: number
 ): Promise<{ error?: string }> {
-  // UUID v4 format check
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+  ) {
     return { error: "Invalid ID." };
   }
 

@@ -16,7 +16,7 @@ import {
   Upload, Loader2,
 } from "lucide-react";
 import type { GalleryMedia } from "@/lib/supabase/database.types";
-import { uploadMediaAction, loadMoreMediaAction } from "@/app/actions/gallery";
+import { getUploadUrlAction, confirmUploadAction, loadMoreMediaAction } from "@/app/actions/gallery";
 
 // HEIC/HEIF cannot be rendered by browsers natively
 const BROWSER_UNRENDERABLE = new Set(["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"]);
@@ -314,23 +314,86 @@ function MediaCard({ media, onOpen, index }: {
 }
 
 // ─── UploadModal ──────────────────────────────────────────────────────────────
+// Uses presigned URL flow to bypass Vercel 4.5MB server action limit:
+// 1. Get signed upload URL from server (tiny request)
+// 2. Upload file DIRECTLY from browser to Supabase Storage (no size limit)
+// 3. Confirm upload to server — save metadata to DB
 
 function UploadModal({ onClose }: { onClose: () => void }) {
-  const [status, setStatus]  = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [status, setStatus]   = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [progress, setProgress] = useState(0); // 0-100 upload progress
   const [errorMsg, setErrorMsg] = useState("");
+  const fileRef    = useRef<HTMLInputElement>(null);
+  const passcodeRef = useRef<HTMLInputElement>(null);
+  const categoryRef = useRef<HTMLSelectElement>(null);
+  const captionRef  = useRef<HTMLInputElement>(null);
+  const nameRef     = useRef<HTMLInputElement>(null);
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setStatus("loading");
     setErrorMsg("");
-    const result = await uploadMediaAction(formData).catch(() => ({
-      error: "Terjadi kesalahan. Coba lagi.",
-    }));
-    if (result.error) {
-      setErrorMsg(result.error);
-      setStatus("error");
-    } else {
+    setProgress(0);
+
+    const file      = fileRef.current?.files?.[0];
+    const passcode  = passcodeRef.current?.value ?? "";
+    const category  = categoryRef.current?.value ?? "Everyday";
+    const caption   = captionRef.current?.value?.trim() || null;
+    const uploadedBy = nameRef.current?.value?.trim() || null;
+
+    if (!file) { setErrorMsg("Pilih file dulu."); setStatus("error"); return; }
+
+    try {
+      // ── Step 1: Get presigned URL ─────────────────────────
+      setProgress(5);
+      const presign = await getUploadUrlAction(
+        file.type,
+        file.name,
+        file.size / (1024 * 1024),
+        passcode
+      );
+      if (presign.error) throw new Error(presign.error);
+      const { signedUrl, storagePath, publicUrl } = presign.data!;
+
+      // ── Step 2: Upload directly to Supabase Storage ───────
+      // Using XMLHttpRequest for progress events (fetch doesn't support upload progress)
+      setProgress(10);
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", signedUrl);
+        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.setRequestHeader("x-upsert", "false");
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setProgress(10 + Math.floor((e.loaded / e.total) * 80));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Upload failed: HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error("Upload gagal. Cek koneksi."));
+        xhr.send(file);
+      });
+
+      // ── Step 3: Confirm metadata to DB ───────────────────
+      setProgress(95);
+      const confirm = await confirmUploadAction(
+        storagePath, publicUrl, file.type,
+        file.size, category, caption, uploadedBy, passcode
+      );
+      if (confirm.error) throw new Error(confirm.error);
+
+      setProgress(100);
       setStatus("success");
       setTimeout(() => { onClose(); window.location.reload(); }, 1600);
+
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Terjadi kesalahan. Coba lagi.");
+      setStatus("error");
+      setProgress(0);
     }
   }
 
@@ -339,9 +402,8 @@ function UploadModal({ onClose }: { onClose: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center
-                 bg-void/90 backdrop-blur-sm p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-void/90 backdrop-blur-sm p-4"
+      onClick={status === "loading" ? undefined : onClose}
     >
       <motion.div
         initial={{ scale: 0.9, y: 20 }}
@@ -352,7 +414,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-display text-xl text-ink">Upload ke Archive</h3>
-          <button onClick={onClose} className="text-muted hover:text-ink">
+          <button onClick={onClose} disabled={status === "loading"} className="text-muted hover:text-ink disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center">
             <X size={18} />
           </button>
         </div>
@@ -360,20 +422,14 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         {status === "success" ? (
           <div className="text-center py-8">
             <p className="text-4xl mb-3">✅</p>
-            <p className="font-display text-xl text-gold">Upload berhasil!</p>
+            <p className="font-display text-xl text-blue">Upload berhasil!</p>
             <p className="font-body text-sm text-muted mt-2">Halaman akan refresh…</p>
           </div>
         ) : (
-          <form action={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                PASSCODE KELAS *
-              </label>
-              <input
-                name="passcode" type="password"
-                placeholder="Masukkan passcode"
-                required className="input-dark"
-              />
+              <label className="block font-mono text-[11px] text-muted mb-1.5">PASSCODE KELAS *</label>
+              <input ref={passcodeRef} type="password" placeholder="Masukkan passcode" required className="input-dark" />
             </div>
 
             <div>
@@ -381,21 +437,17 @@ function UploadModal({ onClose }: { onClose: () => void }) {
                 FILE (Foto & Video iPhone/Android) *
               </label>
               <input
-                name="file" type="file" accept="image/*,.heic,.heif,video/mp4,video/quicktime,.mov"
+                ref={fileRef} type="file"
+                accept="image/*,.heic,.heif,video/mp4,video/quicktime,.mov"
                 required
-                className="w-full text-sm text-muted
-                           file:mr-3 file:py-1.5 file:px-3 file:rounded-lg
-                           file:border-0 file:text-xs file:font-semibold
-                           file:bg-gold file:text-void hover:file:bg-gold-dim
-                           cursor-pointer"
+                className="w-full text-sm text-muted file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue file:text-void hover:file:bg-blue-dim cursor-pointer"
               />
+              <p className="font-mono text-[10px] text-muted/50 mt-1">JPEG, PNG, HEIC, MP4, MOV — no size limit</p>
             </div>
 
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                KATEGORI *
-              </label>
-              <select name="category" required className="input-dark">
+              <label className="block font-mono text-[11px] text-muted mb-1.5">KATEGORI *</label>
+              <select ref={categoryRef} required className="input-dark">
                 {ALL_CATEGORIES.filter((c) => c !== "Semua").map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -403,41 +455,42 @@ function UploadModal({ onClose }: { onClose: () => void }) {
             </div>
 
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                CAPTION (opsional)
-              </label>
-              <input
-                name="caption" type="text"
-                placeholder="Ceritain dikit…" maxLength={200}
-                className="input-dark"
-              />
+              <label className="block font-mono text-[11px] text-muted mb-1.5">CAPTION (opsional)</label>
+              <input ref={captionRef} type="text" placeholder="Ceritain dikit…" maxLength={200} className="input-dark" />
             </div>
 
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                NAMA LO (opsional)
-              </label>
-              <input
-                name="uploadedBy" type="text"
-                placeholder="Biar orang tau siapa yang upload" maxLength={60}
-                className="input-dark"
-              />
+              <label className="block font-mono text-[11px] text-muted mb-1.5">NAMA LO (opsional)</label>
+              <input ref={nameRef} type="text" placeholder="Biar orang tau siapa yang upload" maxLength={60} className="input-dark" />
             </div>
 
+            {/* Progress bar */}
+            {status === "loading" && progress > 0 && (
+              <div className="space-y-1">
+                <div className="h-1.5 bg-faint rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-blue rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
+                <p className="font-mono text-[10px] text-muted text-right">{progress}%</p>
+              </div>
+            )}
+
             {errorMsg && (
-              <p className="text-coral text-sm bg-coral/10 rounded-lg px-3 py-2">
-                {errorMsg}
+              <p className="text-coral text-sm bg-coral/10 rounded-lg px-3 py-2 flex items-center gap-2">
+                <span>⚠</span>{errorMsg}
               </p>
             )}
 
             <button
               type="submit" disabled={status === "loading"}
-              className="btn-gold justify-center mt-2 disabled:opacity-60"
+              className="btn-blue justify-center mt-2 disabled:opacity-60"
             >
-              {status === "loading"
-                ? <Loader2 size={16} className="animate-spin" />
-                : <Upload size={16} />}
-              {status === "loading" ? "Uploading…" : "Upload ke Archive"}
+              {status === "loading" ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              {status === "loading" ? `Uploading… ${progress}%` : "Upload ke Archive"}
             </button>
           </form>
         )}

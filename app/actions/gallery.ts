@@ -4,122 +4,153 @@ import { randomUUID } from "crypto";
 import type { GalleryMedia } from "@/lib/supabase/database.types";
 
 const GALLERY_BUCKET = "gallery";
-const MAX_IMAGE_BYTES = 50 * 1024 * 1024;   // 50 MB (HEIC files are bigger)
-const MAX_VIDEO_BYTES = 500 * 1024 * 1024;  // 500 MB (MOV from iPhone are huge)
 const PAGE_SIZE = 24;
 
-// All accepted MIME types → storage extension
-// Covers every format iPhone Camera produces
 const ALLOWED_MIME_TYPES = new Map<string, string>([
-  ["image/jpeg",           "jpg"],
-  ["image/jpg",            "jpg"],   // non-standard but some browsers send this
-  ["image/png",            "png"],
-  ["image/webp",           "webp"],
-  ["image/gif",            "gif"],
-  ["image/heic",           "heic"],  // iPhone default since iOS 11
-  ["image/heif",           "heif"],
-  ["image/heic-sequence",  "heic"],
-  ["image/heif-sequence",  "heif"],
-  ["video/mp4",            "mp4"],
-  ["video/quicktime",      "mov"],   // iPhone .mov — most common iPhone video
-  ["video/x-m4v",          "m4v"],
-  ["video/x-mov",          "mov"],
+  ["image/jpeg",          "jpg"],
+  ["image/jpg",           "jpg"],
+  ["image/png",           "png"],
+  ["image/webp",          "webp"],
+  ["image/gif",           "gif"],
+  ["image/heic",          "heic"],
+  ["image/heif",          "heif"],
+  ["image/heic-sequence", "heic"],
+  ["image/heif-sequence", "heif"],
+  ["video/mp4",           "mp4"],
+  ["video/quicktime",     "mov"],
+  ["video/x-m4v",         "m4v"],
+  ["video/x-mov",         "mov"],
 ]);
 
-// HEIC/HEIF: stored fine, but browser can't render inline
-const BROWSER_UNRENDERABLE = new Set([
-  "image/heic", "image/heif",
-  "image/heic-sequence", "image/heif-sequence",
-]);
+const MAX_IMAGE_MB = 50;
+const MAX_VIDEO_MB = 500;
 
-// ─── Upload ───────────────────────────────────────────────────────────────────
-interface UploadResult {
+// ─── Step 1: Get presigned upload URL ────────────────────────────────────────
+// Client calls this FIRST to get a short-lived signed URL, then uploads the
+// file DIRECTLY from browser to Supabase Storage — completely bypasses Vercel's
+// 4.5 MB serverless body limit.
+
+interface PresignResult {
   error?: string;
-  data?: { id: string; storage_url: string };
+  data?: {
+    signedUrl: string;
+    token: string;
+    storagePath: string;
+    publicUrl: string;
+  };
 }
 
-export async function uploadMediaAction(
-  formData: FormData
-): Promise<UploadResult> {
-  const passcode = formData.get("passcode") as string;
+export async function getUploadUrlAction(
+  mimeType: string,
+  fileName: string,
+  fileSizeMB: number,
+  passcode: string
+): Promise<PresignResult> {
   if (!validatePasscode(passcode)) {
     return { error: "Passcode salah. Minta ke admin kelas." };
   }
 
-  const file = formData.get("file") as File | null;
-  if (!file || file.size === 0) return { error: "File tidak ditemukan." };
-
-  // Normalize MIME — iPhone sometimes sends empty/generic type for HEIC/MOV
-  let mimeType = file.type;
-  if (!mimeType || mimeType === "application/octet-stream") {
-    const name = file.name.toLowerCase();
-    if      (name.endsWith(".heic"))                     mimeType = "image/heic";
-    else if (name.endsWith(".heif"))                     mimeType = "image/heif";
-    else if (name.endsWith(".mov"))                      mimeType = "video/quicktime";
-    else if (name.endsWith(".jpg") || name.endsWith(".jpeg")) mimeType = "image/jpeg";
-    else if (name.endsWith(".png"))                      mimeType = "image/png";
-    else if (name.endsWith(".mp4"))                      mimeType = "video/mp4";
+  // Normalize mime from file extension if browser sends empty/octet-stream
+  let resolvedMime = mimeType;
+  if (!resolvedMime || resolvedMime === "application/octet-stream") {
+    const lowerName = fileName.toLowerCase();
+    if      (lowerName.endsWith(".heic"))                      resolvedMime = "image/heic";
+    else if (lowerName.endsWith(".heif"))                      resolvedMime = "image/heif";
+    else if (lowerName.endsWith(".mov"))                       resolvedMime = "video/quicktime";
+    else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) resolvedMime = "image/jpeg";
+    else if (lowerName.endsWith(".png"))                       resolvedMime = "image/png";
+    else if (lowerName.endsWith(".mp4"))                       resolvedMime = "video/mp4";
   }
 
-  const ext = ALLOWED_MIME_TYPES.get(mimeType);
+  const ext = ALLOWED_MIME_TYPES.get(resolvedMime);
   if (!ext) {
-    return {
-      error: `Format tidak didukung: ${mimeType || file.name}. Yang didukung: JPEG, PNG, WebP, GIF, HEIC, MP4, MOV.`,
-    };
+    return { error: `Format tidak didukung: ${resolvedMime}. Yang didukung: JPEG, PNG, WebP, GIF, HEIC, MP4, MOV.` };
   }
 
-  const isVideo = mimeType.startsWith("video/");
-  const maxSize = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
-  if (file.size > maxSize) {
-    const maxMB = Math.round(maxSize / (1024 * 1024));
-    return { error: `Terlalu besar. Maks ${maxMB} MB untuk ${isVideo ? "video" : "gambar"}.` };
+  const isVideo  = resolvedMime.startsWith("video/");
+  const maxSizeMB = isVideo ? MAX_VIDEO_MB : MAX_IMAGE_MB;
+  if (fileSizeMB > maxSizeMB) {
+    return { error: `Terlalu besar. Maks ${maxSizeMB} MB untuk ${isVideo ? "video" : "gambar"}.` };
   }
-
-  const category   = (formData.get("category")   as string) || "Everyday";
-  const caption    = ((formData.get("caption")    as string) || "").trim() || null;
-  const uploadedBy = ((formData.get("uploadedBy") as string) || "").trim() || null;
 
   const uuid        = randomUUID();
   const storagePath = `${isVideo ? "videos" : "images"}/${uuid}.${ext}`;
 
   const supabase = createAdminClient();
-  const buffer   = new Uint8Array(await file.arrayBuffer());
 
-  const { error: uploadError } = await supabase.storage
+  // Create a signed upload URL valid for 10 minutes
+  const { data, error } = await supabase.storage
     .from(GALLERY_BUCKET)
-    .upload(storagePath, buffer, {
-      contentType: mimeType,
-      upsert: false,
-      cacheControl: "31536000",
-    });
+    .createSignedUploadUrl(storagePath);
 
-  if (uploadError) {
-    console.error("[gallery:upload] Storage error:", uploadError);
-    return { error: "Upload gagal. Cek apakah bucket 'gallery' sudah dibuat dan public." };
+  if (error) {
+    console.error("[gallery:presign] error:", error);
+    return { error: "Gagal menyiapkan upload. Coba lagi." };
   }
 
-  const { data: { publicUrl: storageUrl } } = supabase.storage
+  const { data: { publicUrl } } = supabase.storage
     .from(GALLERY_BUCKET)
     .getPublicUrl(storagePath);
 
+  return {
+    data: {
+      signedUrl:   data.signedUrl,
+      token:       data.token,
+      storagePath,
+      publicUrl,
+    },
+  };
+}
+
+// ─── Step 2: Confirm upload & save metadata ───────────────────────────────────
+// Called after the client has successfully uploaded the file directly to storage.
+
+interface ConfirmResult {
+  error?: string;
+  data?: { id: string; storage_url: string };
+}
+
+export async function confirmUploadAction(
+  storagePath: string,
+  publicUrl: string,
+  mimeType: string,
+  fileSizeBytes: number,
+  category: string,
+  caption: string | null,
+  uploadedBy: string | null,
+  passcode: string
+): Promise<ConfirmResult> {
+  if (!validatePasscode(passcode)) {
+    return { error: "Passcode salah." };
+  }
+
+  // Validate path looks like our generated paths (prevent injection)
+  if (!/^(images|videos)\/[0-9a-f-]{36}\.[a-z0-9]+$/.test(storagePath)) {
+    return { error: "Invalid storage path." };
+  }
+
+  const isVideo = mimeType.startsWith("video/");
+
+  const supabase = createAdminClient();
   const { data: inserted, error: dbError } = await supabase
     .from("gallery_media")
     .insert({
       storage_path:    storagePath,
-      storage_url:     storageUrl,
+      storage_url:     publicUrl,
       media_type:      isVideo ? "video" : "image",
       mime_type:       mimeType,
-      caption,
-      category,
-      uploaded_by:     uploadedBy,
-      file_size_bytes: file.size,
+      caption:         caption || null,
+      category:        category || "Everyday",
+      uploaded_by:     uploadedBy || null,
+      file_size_bytes: fileSizeBytes,
     })
     .select("id, storage_url")
     .single();
 
   if (dbError) {
-    console.error("[gallery:upload] DB insert error:", dbError);
-    await supabase.storage.from(GALLERY_BUCKET).remove([storagePath]);
+    console.error("[gallery:confirm] DB insert error:", dbError);
+    // Best-effort cleanup of orphaned file
+    await supabase.storage.from(GALLERY_BUCKET).remove([storagePath]).catch(() => {});
     return { error: "Gagal simpan ke database. Coba lagi." };
   }
 
@@ -142,7 +173,9 @@ export async function loadMoreMediaAction(
 
   let query = supabase
     .from("gallery_media")
-    .select("id, storage_path, storage_url, media_type, mime_type, caption, category, uploaded_by, width, height, file_size_bytes, created_at")
+    .select(
+      "id, storage_path, storage_url, media_type, mime_type, caption, category, uploaded_by, width, height, file_size_bytes, created_at"
+    )
     .lt("created_at", cursor)
     .order("created_at", { ascending: false })
     .limit(PAGE_SIZE + 1);
@@ -162,4 +195,4 @@ export async function loadMoreMediaAction(
   return { data: { items, hasMore, nextCursor } };
 }
 
-export { BROWSER_UNRENDERABLE };
+export { ALLOWED_MIME_TYPES };

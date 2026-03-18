@@ -8,14 +8,15 @@ const nextConfig = {
         port: "",
         pathname: "/storage/v1/object/public/**",
       },
-      // Unsplash placeholders
       { protocol: "https", hostname: "images.unsplash.com" },
     ],
   },
   experimental: {
     serverActions: {
-      // Large enough for 500MB MOV videos from iPhone
-      bodySizeLimit: "600mb",
+      // 4mb — Vercel serverless hard limit is 4.5MB.
+      // For larger files (photos, videos), client uploads directly
+      // to Supabase Storage via presigned URL (see uploadMediaAction).
+      bodySizeLimit: "4mb",
     },
   },
 };

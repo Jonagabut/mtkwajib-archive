@@ -1,5 +1,5 @@
 // app/layout.tsx
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import { Playfair_Display, DM_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -17,6 +17,7 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "MTK Wajib Archive — Class of 2026",
   description: "Yearbook digital dan arsip kolaboratif angkatan MTK Wajib 2026.",
+  // themeColor + viewport handled in <head> tag below for Next.js 14 compatibility
   openGraph: {
     title: "MTK Wajib Archive — Class of 2026",
     description: "Kenangan kita, tersimpan selamanya.",
@@ -24,18 +25,19 @@ export const metadata: Metadata = {
   },
 };
 
-// Proper iOS viewport — viewport-fit=cover handles notch safe areas
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",         // ← key fix for iPhone notch
-  themeColor: "#040c1e",        // ← fixes iOS status bar color (no more blue tint)
-  colorScheme: "dark",
-};
-
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id" className="scroll-smooth">
+      <head>
+        {/* iOS status bar + notch — must be in <head> for Next.js 14 */}
+        <meta name="theme-color" content="#040c1e" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+      </head>
       <body
         className={`${playfair.variable} ${dmSans.variable} ${jetbrains.variable} font-body bg-void text-ink antialiased`}
       >
