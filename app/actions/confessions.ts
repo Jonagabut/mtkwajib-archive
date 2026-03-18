@@ -1,16 +1,13 @@
 "use server";
-import { createAdminClient, validatePasscode } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import type { NoteColor } from "@/lib/supabase/database.types";
 
 // ─── Rate limit via DB ────────────────────────────────────────────────────────
-// In-memory rate limiters don't work on Vercel (stateless serverless).
-// Instead: count confessions in the last 10 minutes.
-// Since confessions are anonymous (no user ID), we limit per PASSCODE globally —
-// max 30 notes per 10 minutes total across all users.
-// This prevents bulk spam while still letting a whole class post freely.
+// No passcode needed for notes — siapapun bisa tempel.
+// Rate limit: max 30 notes per 10 menit secara global (anti-spam).
 
 const RATE_WINDOW_MIN = 10;
-const RATE_MAX_GLOBAL = 30; // max notes per 10-min window globally
+const RATE_MAX_GLOBAL = 30;
 
 async function checkGlobalRateLimit(): Promise<boolean> {
   try {
@@ -21,14 +18,13 @@ async function checkGlobalRateLimit(): Promise<boolean> {
       .select("id", { count: "exact", head: true })
       .gte("created_at", since);
 
-    if (error) return true; // fail open — don't block if count query fails
+    if (error) return true;
     return (count ?? 0) < RATE_MAX_GLOBAL;
   } catch {
-    return true; // fail open
+    return true;
   }
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface ActionResult {
   error?: string;
   data?: { id: string };
@@ -36,35 +32,27 @@ interface ActionResult {
 
 const VALID_COLORS: readonly NoteColor[] = ["yellow", "pink", "lavender"];
 
-// ─── Post confession ──────────────────────────────────────────────────────────
+// ─── Post confession — NO passcode required ───────────────────────────────────
 export async function postConfessionAction(
   formData: FormData
 ): Promise<ActionResult> {
-  // Passcode first — fast reject without hitting DB
-  const passcode = formData.get("passcode") as string;
-  if (!validatePasscode(passcode)) {
-    return { error: "Passcode salah, bro." };
-  }
-
   // Content validation
   const content = (formData.get("content") as string)?.trim();
   if (!content || content.length === 0) return { error: "Tulis sesuatu dulu!" };
-  if (content.length > 50) return { error: "Terlalu panjang. Maksimum 50 karakter." };
+  if (content.length > 280) return { error: "Terlalu panjang. Maksimum 280 karakter." };
 
   // Color validation
   const color = (formData.get("color") as NoteColor) || "yellow";
   if (!VALID_COLORS.includes(color)) return { error: "Warna tidak valid." };
 
-  // Global rate limit check (DB-based, works on serverless)
+  // Global rate limit
   const allowed = await checkGlobalRateLimit();
   if (!allowed) {
-    return {
-      error: `Board lagi rame banget! Coba lagi dalam beberapa menit.`,
-    };
+    return { error: `Board lagi rame banget! Coba lagi dalam beberapa menit.` };
   }
 
-  const x_pos       = Math.random() * 560 + 40;
-  const y_pos       = Math.random() * 380 + 40;
+  const x_pos        = Math.random() * 560 + 40;
+  const y_pos        = Math.random() * 380 + 40;
   const rotation_deg = (Math.random() - 0.5) * 10;
 
   const supabase = createAdminClient();

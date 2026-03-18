@@ -4,9 +4,9 @@
 
 /* ── iOS safe area + base ──────────────────────────────── */
 :root {
-  --font-playfair: "Playfair Display", Georgia, serif;
-  --font-dm-sans:  "DM Sans", system-ui, sans-serif;
-  --font-jetbrains:"JetBrains Mono", monospace;
+  --font-playfair:  "Playfair Display", Georgia, serif;
+  --font-dm-sans:   "DM Sans", system-ui, sans-serif;
+  --font-jetbrains: "JetBrains Mono", monospace;
 
   --safe-top:    env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -17,7 +17,6 @@
   scrollbar-color: #4d94ff #0b1c3a;
 }
 
-/* Prevent iOS rubber-band showing wrong bg */
 html {
   background: #040c1e;
   overflow-x: hidden;
@@ -26,7 +25,6 @@ html {
 body {
   background: #040c1e;
   overflow-x: hidden;
-  /* Full-height on mobile without URL bar issues */
   min-height: 100dvh;
 }
 
@@ -36,15 +34,20 @@ body {
 
 ::selection { background: #4d94ff35; color: #7ab4ff; }
 
+/* Scrollbar hidden utility */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
 /* ── Base ─────────────────────────────────────────────── */
 @layer base {
   h1, h2, h3, h4 { font-family: var(--font-playfair); }
   body            { font-family: var(--font-dm-sans); }
 
-  /* Prevent tap highlight flashes on iOS */
   * { -webkit-tap-highlight-color: transparent; }
 
-  /* Smooth scroll, but not on iOS where it causes lag */
   @media (prefers-reduced-motion: no-preference) {
     html { scroll-behavior: smooth; }
   }
@@ -61,7 +64,7 @@ body {
     @apply font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl text-ink leading-tight;
   }
 
-  /* Glass card — works on both dark sections */
+  /* Glass card */
   .card-glass {
     @apply bg-card/80 backdrop-blur-md border border-border rounded-2xl;
   }
@@ -72,13 +75,11 @@ body {
            bg-blue text-void font-body font-semibold text-sm
            rounded-xl hover:bg-blue-dim active:scale-95
            transition-all duration-200 shadow-blue-glow
-           min-h-[44px]; /* iOS tap target */
+           min-h-[44px];
   }
 
-  /* Keep .btn-gold as alias for zero regressions */
-  .btn-gold {
-    @apply btn-blue;
-  }
+  /* Keep .btn-gold as alias */
+  .btn-gold { @apply btn-blue; }
 
   .btn-outline {
     @apply inline-flex items-center gap-2 px-5 py-2.5 border border-border
@@ -92,51 +93,49 @@ body {
            text-ink text-sm placeholder-muted
            focus:outline-none focus:border-blue focus:ring-1 focus:ring-blue/30
            transition-all duration-200
-           min-h-[44px]; /* iOS tap target */
+           min-h-[44px];
   }
 
   /* Masonry */
-  .masonry-grid    { display: flex; margin-left: -16px; width: auto; }
-  .masonry-column  { padding-left: 16px; background-clip: padding-box; }
+  .masonry-grid   { display: flex; margin-left: -16px; width: auto; }
+  .masonry-column { padding-left: 16px; background-clip: padding-box; }
 
-  /* 3D Card flip */
+  /* ── 3D Card flip ─────────────────────────────────────── */
+  /* Click/tap ONLY — removed :hover so mobile doesn't get stuck */
   .flip-card       { perspective: 1200px; }
   .flip-card-inner {
-    position: relative; width: 100%; height: 100%;
+    position: relative;
+    width: 100%;
+    height: 100%;
     transition: transform 0.7s cubic-bezier(0.4, 0, 0.2, 1);
     transform-style: preserve-3d;
   }
-  .flip-card:hover .flip-card-inner,
+  /* Only trigger on .flipped class, never on hover */
   .flip-card.flipped .flip-card-inner { transform: rotateY(180deg); }
 
   .flip-card-front,
   .flip-card-back {
-    position: absolute; width: 100%; height: 100%;
-    backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
   .flip-card-back { transform: rotateY(180deg); }
 }
 
-/* ── Hero ──────────────────────────────────────────────── */
+/* ── Hero ─────────────────────────────────────────────── */
 .hero-text-shadow {
-  text-shadow: 0 0 80px rgba(77,148,255,0.25), 0 4px 30px rgba(0,0,0,0.9);
+  text-shadow: 0 0 80px rgba(77,148,255,0.3), 0 4px 30px rgba(0,0,0,0.9);
 }
 
-/* ── Board ─────────────────────────────────────────────── */
-.board-bg {
-  background:
-    #0b1c3a
-    repeating-linear-gradient(0deg,  transparent, transparent 39px, rgba(77,148,255,0.04) 40px)
-    repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(77,148,255,0.04) 40px);
-}
-
-/* ── Lightbox ──────────────────────────────────────────── */
+/* ── Lightbox ─────────────────────────────────────────── */
 .lightbox-overlay { backdrop-filter: blur(20px) saturate(0.4); }
 
-/* ── Video controls ────────────────────────────────────── */
+/* ── Video controls ───────────────────────────────────── */
 video::-webkit-media-controls-panel {
   background: linear-gradient(transparent, rgba(0,0,0,0.8));
 }
 
-/* ── iPhone notch / safe area padding on fixed header ──── */
+/* ── iPhone notch / safe area ─────────────────────────── */
 .safe-top { padding-top: var(--safe-top); }

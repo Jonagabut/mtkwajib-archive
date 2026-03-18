@@ -10,13 +10,18 @@ const nextConfig = {
       },
       { protocol: "https", hostname: "images.unsplash.com" },
     ],
+    // Allow images from public/uploads/ (local dev upload feature)
+    // Next.js 14.2+ supports localPatterns
+    localPatterns: [
+      { pathname: "/uploads/**" },
+    ],
+    // Unoptimized local images (avoids needing width/height for local files)
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
+    imageSizes:  [16, 32, 64, 96, 128, 256],
   },
   experimental: {
     serverActions: {
-      // 4mb — Vercel serverless hard limit is 4.5MB.
-      // For larger files (photos, videos), client uploads directly
-      // to Supabase Storage via presigned URL (see uploadMediaAction).
-      bodySizeLimit: "4mb",
+      bodySizeLimit: "50mb", // Allow large file uploads through API route
     },
   },
 };

@@ -10,7 +10,8 @@ import type { Student, GalleryMedia, Confession } from "@/lib/supabase/database.
 
 export const revalidate = 60;
 
-// ─── Standalone config fetcher (no auth required, public read via RLS) ────────
+// ─── Supabase fetchers (all silent-fail) ──────────────────
+
 async function getLogoUrl(): Promise<string | null> {
   try {
     const supabase = createAdminClient();
@@ -21,7 +22,7 @@ async function getLogoUrl(): Promise<string | null> {
       .single();
     return data?.value ?? null;
   } catch {
-    return null; // silently return null — site_config might not exist yet
+    return null;
   }
 }
 
@@ -34,10 +35,12 @@ async function getStudents(): Promise<Student[]> {
       .order("class_number", { ascending: true });
     if (error) throw error;
     return (data as Student[]) ?? [];
-  } catch (err) { console.error("[page] getStudents:", err); return []; }
+  } catch {
+    return [];
+  }
 }
 
-async function getGalleryMedia(): Promise<GalleryMedia[]> {
+async function getSupabaseGallery(): Promise<GalleryMedia[]> {
   try {
     const supabase = createAdminClient();
     const { data, error } = await supabase
@@ -47,7 +50,83 @@ async function getGalleryMedia(): Promise<GalleryMedia[]> {
       .limit(24);
     if (error) throw error;
     return (data as GalleryMedia[]) ?? [];
-  } catch (err) { console.error("[page] getGalleryMedia:", err); return []; }
+  } catch {
+    return [];
+  }
+}
+
+// ─── Local file gallery — reads from public/uploads/ ─────
+
+async function getLocalGallery(): Promise<GalleryMedia[]> {
+  try {
+    const { readdir, stat } = await import("fs/promises");
+    const { join, extname } = await import("path");
+
+    const uploadDir = join(process.cwd(), "public", "uploads");
+    let files: string[];
+    try {
+      files = await readdir(uploadDir);
+    } catch {
+      return []; // Directory doesn't exist yet — that's fine
+    }
+
+    const imageExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
+    const videoExts = new Set([".mp4", ".mov", ".m4v"]);
+    const mimeMap: Record<string, string> = {
+      ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+      ".png": "image/png",  ".webp": "image/webp",
+      ".gif": "image/gif",  ".heic": "image/heic",
+      ".heif": "image/heif",".mp4": "video/mp4",
+      ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+    };
+
+    const mediaFiles = files.filter((f) => {
+      const ext = extname(f).toLowerCase();
+      return imageExts.has(ext) || videoExts.has(ext);
+    });
+
+    const results = await Promise.allSettled(
+      mediaFiles.map(async (filename, i) => {
+        const ext      = extname(filename).toLowerCase();
+        const fileStat = await stat(join(uploadDir, filename));
+        const isVideo  = videoExts.has(ext);
+
+        return {
+          id:              `local-${i}-${filename}`,
+          storage_path:    `uploads/${filename}`,
+          storage_url:     `/uploads/${filename}`,
+          media_type:      (isVideo ? "video" : "image") as "video" | "image",
+          mime_type:       mimeMap[ext] ?? null,
+          caption:         null,
+          category:        "Everyday",
+          uploaded_by:     null,
+          width:           null,
+          height:          null,
+          file_size_bytes: fileStat.size,
+          created_at:      fileStat.mtime.toISOString(),
+        } satisfies GalleryMedia;
+      })
+    );
+
+    return results
+      .filter((r): r is PromiseFulfilledResult<GalleryMedia> => r.status === "fulfilled")
+      .map((r) => r.value)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  } catch {
+    return [];
+  }
+}
+
+async function getGalleryMedia(): Promise<GalleryMedia[]> {
+  const [supabaseMedia, localMedia] = await Promise.all([
+    getSupabaseGallery(),
+    getLocalGallery(),
+  ]);
+
+  // Merge, local files at the end (Supabase is source of truth)
+  const seen = new Set(supabaseMedia.map((m) => m.storage_url));
+  const unique = localMedia.filter((m) => !seen.has(m.storage_url));
+  return [...supabaseMedia, ...unique].slice(0, 48);
 }
 
 async function getConfessions(): Promise<Confession[]> {
@@ -60,8 +139,12 @@ async function getConfessions(): Promise<Confession[]> {
       .limit(100);
     if (error) throw error;
     return (data as Confession[]) ?? [];
-  } catch (err) { console.error("[page] getConfessions:", err); return []; }
+  } catch {
+    return [];
+  }
 }
+
+// ─── Page ─────────────────────────────────────────────────
 
 export default async function HomePage() {
   const [logoUrl, students, galleryMedia, confessions] = await Promise.all([
@@ -77,42 +160,48 @@ export default async function HomePage() {
 
       <HeroSection logoUrl={logoUrl} />
 
-      {/* ── Warga Kelas ── */}
+      {/* Warga Kelas */}
       <section id="roster" className="relative py-16 md:py-24 bg-surface">
-        <div className="absolute inset-0 bg-grid-lines bg-grid pointer-events-none opacity-60" />
+        <div className="absolute inset-0 bg-grid-lines bg-grid pointer-events-none opacity-50" />
         <div className="container mx-auto px-4 md:px-8 relative z-10">
           <div className="mb-10 text-center">
             <p className="section-label mb-2">Angkatan 2026</p>
-            <h2 className="section-title">Warga <span className="text-blue">Kelas</span></h2>
+            <h2 className="section-title">
+              Warga <span className="text-blue">Kelas</span>
+            </h2>
             <p className="mt-3 text-muted max-w-sm mx-auto font-body text-sm">
-              Semua wajah yang pernah berjuang bareng—dari MTK sampai wisuda.
+              Semua wajah yang pernah berjuang bareng — dari MTK sampai wisuda.
             </p>
           </div>
           <StudentRoster students={students} />
         </div>
       </section>
 
-      {/* ── Gallery ── */}
+      {/* Gallery */}
       <section id="gallery" className="relative py-16 md:py-24 bg-void">
         <div className="container mx-auto px-4 md:px-8">
           <div className="mb-10 text-center">
             <p className="section-label mb-2">Memories</p>
-            <h2 className="section-title">The <span className="text-blue">Archive</span></h2>
+            <h2 className="section-title">
+              The <span className="text-blue">Archive</span>
+            </h2>
             <p className="mt-3 text-muted max-w-sm mx-auto font-body text-sm">
-              Foto dan video dari semua momen.
+              Foto dan video dari semua momen. Upload dari hape langsung.
             </p>
           </div>
           <MediaGallery initialMedia={galleryMedia} />
         </div>
       </section>
 
-      {/* ── Confession Board ── */}
+      {/* Confession Board */}
       <section id="board" className="relative py-16 md:py-24 bg-surface">
-        <div className="absolute inset-0 bg-grid-lines bg-grid pointer-events-none opacity-60" />
+        <div className="absolute inset-0 bg-grid-lines bg-grid pointer-events-none opacity-50" />
         <div className="container mx-auto px-4 md:px-8 relative z-10">
           <div className="mb-10 text-center">
             <p className="section-label mb-2">Anonymous</p>
-            <h2 className="section-title">Confession <span className="text-blue">Board</span></h2>
+            <h2 className="section-title">
+              Confession <span className="text-blue">Board</span>
+            </h2>
             <p className="mt-3 text-muted max-w-sm mx-auto font-body text-sm">
               Curhat, roast, atau hal yang belum pernah lo bilang langsung.
             </p>
