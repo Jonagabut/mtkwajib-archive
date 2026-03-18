@@ -1,15 +1,25 @@
 "use client";
-// app/admin/LoginForm.tsx
-import { useActionState } from "react";
+// app/admin/LoginForm.tsx — React 18 / Next.js 14 compatible (useFormState)
+import { useFormState, useFormStatus } from "react-dom";
 import { loginAction } from "@/app/actions/auth";
 import { Loader2, Lock } from "lucide-react";
 
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending}
+      className="btn-blue justify-center mt-1 disabled:opacity-60">
+      {pending ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+      {pending ? "Masuk..." : "Masuk"}
+    </button>
+  );
+}
+
 export default function AdminLoginForm() {
-  const [state, formAction, isPending] = useActionState(loginAction, null);
+  const [state, formAction] = useFormState(loginAction, null);
 
   return (
     <div className="w-full max-w-sm">
-      {/* Header */}
       <div className="text-center mb-8">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl
                         bg-blue/10 border border-blue/20 mb-4">
@@ -46,11 +56,7 @@ export default function AdminLoginForm() {
             </p>
           )}
 
-          <button type="submit" disabled={isPending}
-            className="btn-blue justify-center mt-1 disabled:opacity-60">
-            {isPending ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
-            {isPending ? "Masuk..." : "Masuk"}
-          </button>
+          <SubmitButton />
         </form>
       </div>
 
