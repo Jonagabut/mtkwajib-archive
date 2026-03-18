@@ -75,7 +75,5 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Max request size — Next.js default is 4MB for API routes
-export const config = {
-  api: { bodyParser: false },
-};
+// App Router segment config — replaces the old `export const config`
+export const maxDuration = 60; // seconds, for large file uploads
