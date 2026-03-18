@@ -23,7 +23,7 @@ export default function Footer() {
 
           {/* Nav links */}
           <nav className="flex flex-wrap items-center justify-center gap-4">
-            {["#roster", "#gallery", "#board", "#capsule"].map((href) => (
+            {["#roster", "#gallery", "#board"].map((href) => (
               <a
                 key={href}
                 href={href}
