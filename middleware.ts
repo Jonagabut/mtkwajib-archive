@@ -1,50 +1,68 @@
-// middleware.ts
-// Protects /admin routes — redirects to /admin/login if no valid session.
-// Runs on Edge runtime so it's fast and does not add latency to public pages.
-
+// middleware.ts — Edge runtime compatible (no Buffer, no Node.js crypto)
+// Uses Web Crypto API (available everywhere including Edge)
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
 
 const COOKIE_NAME = "__mtkw_admin";
 
-function verifyTokenEdge(token: string): boolean {
-  const secret = process.env.ADMIN_SESSION_SECRET ?? "";
-  if (!secret) return false;
-
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return false;
-
-  const expected = Buffer.from(
-    createHmac("sha256", secret).update(payload).digest("hex")
-  );
-  const actual = Buffer.from(sig);
-  if (expected.length !== actual.length) return false;
-  if (!timingSafeEqual(expected, actual)) return false;
-
+async function verifyTokenEdge(token: string, secret: string): Promise<boolean> {
   try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString());
+    const parts = token.split(".");
+    if (parts.length !== 2) return false;
+    const [payload, sig] = parts;
+    if (!payload || !sig) return false;
+
+    // Import key using Web Crypto
+    const enc     = new TextEncoder();
+    const keyData = await crypto.subtle.importKey(
+      "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]
+    );
+
+    // Decode hex signature to Uint8Array
+    const sigBytes = new Uint8Array(
+      sig.match(/.{1,2}/g)!.map((b) => parseInt(b, 16))
+    );
+
+    // Verify HMAC
+    const valid = await crypto.subtle.verify(
+      "HMAC", keyData, sigBytes, enc.encode(payload)
+    );
+    if (!valid) return false;
+
+    // Decode payload (base64url → JSON)
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json   = atob(padded + "=".repeat((4 - padded.length % 4) % 4));
+    const data   = JSON.parse(json);
     return Math.floor(Date.now() / 1000) <= data.exp;
   } catch {
     return false;
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow the login page through
+  if (!pathname.startsWith("/admin")) return NextResponse.next();
+
+  // Login page — always accessible
   if (pathname === "/admin" || pathname === "/admin/login") {
     return NextResponse.next();
   }
 
-  // Protect all other /admin/* routes
-  if (pathname.startsWith("/admin")) {
-    const token = request.cookies.get(COOKIE_NAME)?.value;
-    if (!token || !verifyTokenEdge(token)) {
-      const loginUrl = new URL("/admin", request.url);
-      loginUrl.searchParams.set("redirect", pathname);
-      return NextResponse.redirect(loginUrl);
-    }
+  const secret = process.env.ADMIN_SESSION_SECRET ?? "";
+  // If secret not set yet, let the page handle it (shows login)
+  if (!secret) {
+    return NextResponse.redirect(new URL("/admin", request.url));
+  }
+
+  const token = request.cookies.get(COOKIE_NAME)?.value;
+  if (!token) {
+    return NextResponse.redirect(new URL("/admin", request.url));
+  }
+
+  const valid = await verifyTokenEdge(token, secret);
+  if (!valid) {
+    const loginUrl = new URL("/admin", request.url);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

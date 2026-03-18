@@ -104,13 +104,13 @@ function StudentCard({
         delay: (index % 10) * 0.05,
         ease: [0.22, 1, 0.36, 1],
       }}
-      className="flip-card h-[380px] cursor-pointer"
+      className="flip-card h-[340px] sm:h-[380px] cursor-pointer"
       onClick={() => setFlipped((v) => !v)}
     >
       <div className={`flip-card-inner ${flipped ? "flipped" : ""}`}>
         {/* ── FRONT ── */}
         <div className="flip-card-front rounded-2xl overflow-hidden border border-border group">
-          <div className="relative w-full h-[260px] bg-faint overflow-hidden">
+          <div className="relative w-full h-[220px] sm:h-[260px] bg-faint overflow-hidden">
             <Image
               src={student.photo_class_url || PLACEHOLDER_CLASS}
               alt={student.name}
@@ -300,7 +300,7 @@ export default function StudentRoster({ students }: { students: Student[] }) {
       {/* Grid */}
       <motion.div
         layout
-        className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-5"
+        className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 md:gap-5"
       >
         <AnimatePresence mode="popLayout">
           {sorted.length === 0 ? (

@@ -1,193 +1,120 @@
 "use client";
 // components/board/ConfessionBoard.tsx
-// Features:
-//  - Supabase Realtime → new notes appear live for ALL visitors
-//  - Proper submit flow: show error if fails, only close on success
-//  - Optimistic insert only after server confirms (no ghost notes)
-//  - Framer Motion drag with position persisted to DB on drag-end
-//  - Rate-limited server-side (5 posts / 10 min / IP)
+// Redesign: fixed masonry grid of small notes — no dragging.
+// New notes appear live via Supabase Realtime.
+// Post modal: passcode + warna + teks. Error shown in modal.
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { PanInfo } from "framer-motion";
 import { Plus, X, Loader2, Pin, Wifi, WifiOff } from "lucide-react";
 import type { Confession, NoteColor } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/client";
-import {
-  postConfessionAction,
-  updateConfessionPositionAction,
-} from "@/app/actions/confessions";
+import { postConfessionAction } from "@/app/actions/confessions";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const COLOR_OPTIONS = [
-  { value: "yellow"   as NoteColor, label: "Yellow",   preview: "#f5e27a" },
-  { value: "pink"     as NoteColor, label: "Pink",     preview: "#f7b8a0" },
-  { value: "lavender" as NoteColor, label: "Lavender", preview: "#c4b8f0" },
+  { value: "yellow"   as NoteColor, label: "Kuning",  bg: "#f5e27a", shadow: "#c9a232", text: "#3d2f00" },
+  { value: "pink"     as NoteColor, label: "Pink",    bg: "#f7b8a0", shadow: "#c4674e", text: "#3d1200" },
+  { value: "lavender" as NoteColor, label: "Ungu",    bg: "#c4b8f0", shadow: "#7a6faa", text: "#1a1040" },
 ] as const;
 
-const BG_MAP: Record<NoteColor, string> = {
-  yellow:   "linear-gradient(135deg, #f5e27a 0%, #f0d84a 50%, #e8cc30 100%)",
-  pink:     "linear-gradient(135deg, #f7b8a0 0%, #f0956e 50%, #e87850 100%)",
-  lavender: "linear-gradient(135deg, #c4b8f0 0%, #a898e0 50%, #9080d0 100%)",
+const BG: Record<NoteColor, string> = {
+  yellow:   "linear-gradient(145deg,#f5e27a,#eecf35)",
+  pink:     "linear-gradient(145deg,#f7b8a0,#f08a6a)",
+  lavender: "linear-gradient(145deg,#c4b8f0,#a898e0)",
 };
-
-const SHADOW_MAP: Record<NoteColor, string> = {
-  yellow:   "4px 4px 0px #c9a232, 8px 8px 20px rgba(0,0,0,0.4)",
-  pink:     "4px 4px 0px #c4674e, 8px 8px 20px rgba(0,0,0,0.4)",
-  lavender: "4px 4px 0px #7a6faa, 8px 8px 20px rgba(0,0,0,0.4)",
+const TEXT_COLOR: Record<NoteColor, string> = {
+  yellow: "#3d2f00", pink: "#3d1200", lavender: "#1a1040",
 };
-
-const PIN_COLOR: Record<NoteColor, string> = {
+const PIN: Record<NoteColor, string> = {
   yellow: "#c9a232", pink: "#c4674e", lavender: "#7a6faa",
 };
 
-// ─── DraggableNote ────────────────────────────────────────────────────────────
+// ─── Single Note Card ─────────────────────────────────────────────────────────
 
-function DraggableNote({
-  confession,
-  boardRef,
-  isNew,
-}: {
-  confession: Confession;
-  boardRef: React.RefObject<HTMLDivElement | null>;
-  isNew: boolean;
-}) {
-  const [pos, setPos]         = useState({ x: confession.x_pos, y: confession.y_pos });
-  const [dragging, setDragging] = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const color                 = (confession.color as NoteColor) ?? "yellow";
-
-  const handleDragEnd = useCallback(
-    async (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
-      setDragging(false);
-      if (!boardRef.current) return;
-
-      const rect = boardRef.current.getBoundingClientRect();
-      const newX = Math.max(0, Math.min(pos.x + info.offset.x, rect.width  - 200));
-      const newY = Math.max(0, Math.min(pos.y + info.offset.y, rect.height - 180));
-      setPos({ x: newX, y: newY });
-
-      setSaving(true);
-      await updateConfessionPositionAction(confession.id, newX, newY).catch(
-        (err) => console.error("[board] persist position failed:", err)
-      );
-      setSaving(false);
-    },
-    [confession.id, pos, boardRef]
-  );
+function NoteCard({ note, isNew }: { note: Confession; isNew: boolean }) {
+  const color = (note.color as NoteColor) ?? "yellow";
 
   return (
     <motion.div
-      drag
-      dragMomentum={false}
-      dragConstraints={boardRef}
-      onDragStart={() => setDragging(true)}
-      onDragEnd={handleDragEnd}
-      initial={isNew
-        ? { scale: 0, opacity: 0, rotate: confession.rotation_deg, y: -20 }
-        : { scale: 0, opacity: 0, rotate: confession.rotation_deg }}
-      animate={{
-        scale: 1, opacity: 1,
-        rotate: confession.rotation_deg,
-        zIndex: dragging ? 100 : 1,
-      }}
-      exit={{ scale: 0, opacity: 0, transition: { duration: 0.2 } }}
-      whileDrag={{ scale: 1.06, rotate: confession.rotation_deg + 2, zIndex: 100 }}
-      whileHover={{ scale: 1.02, zIndex: 50 }}
-      transition={{ type: "spring", stiffness: 260, damping: 22 }}
+      layout
+      initial={isNew ? { scale: 0.6, opacity: 0, y: -20 } : { scale: 0.95, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1, y: 0 }}
+      exit={{ scale: 0.8, opacity: 0, transition: { duration: 0.15 } }}
+      transition={{ type: "spring", stiffness: 300, damping: 25 }}
       style={{
-        position: "absolute",
-        left: pos.x,
-        top:  pos.y,
-        width: 180,
-        background: BG_MAP[color],
-        boxShadow: SHADOW_MAP[color],
-        cursor: dragging ? "grabbing" : "grab",
-        userSelect: "none",
-        outline: saving ? "2px solid rgba(245,200,66,0.6)" : "none",
+        background:  BG[color],
+        boxShadow:   `3px 3px 0px ${PIN[color]}, 6px 6px 16px rgba(0,0,0,0.35)`,
+        color:       TEXT_COLOR[color],
+        rotate:      `${note.rotation_deg}deg`,
       }}
-      className="rounded-lg p-4 flex flex-col gap-2 min-h-[120px]"
+      className="relative rounded-lg p-3 break-inside-avoid"
     >
+      {/* Pin */}
       <div
-        className="absolute -top-3 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full
-                   border-2 border-void/20 flex items-center justify-center"
-        style={{ background: PIN_COLOR[color] }}
+        className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full
+                   border border-white/30 flex items-center justify-center shadow-sm"
+        style={{ background: PIN[color] }}
       >
-        <Pin size={8} className="text-void/60 -rotate-45" />
+        <Pin size={6} className="opacity-60 -rotate-45" />
       </div>
 
-      <p className="font-body text-sm leading-relaxed text-void/90 break-words">
-        {confession.content}
+      <p className="font-body text-xs leading-relaxed pt-1 break-words whitespace-pre-wrap">
+        {note.content}
       </p>
 
-      <div className="mt-auto flex items-center justify-between">
-        <span className="text-[9px] font-mono text-void/50">anonymous</span>
-        {saving && <Loader2 size={10} className="text-void/40 animate-spin" />}
-      </div>
+      <p className="font-mono text-[8px] opacity-40 mt-2">anonymous</p>
     </motion.div>
   );
 }
 
-// ─── PostNoteModal ────────────────────────────────────────────────────────────
+// ─── Post Modal ───────────────────────────────────────────────────────────────
 
-function PostNoteModal({
+function PostModal({
   onClose,
   onSuccess,
 }: {
   onClose: () => void;
   onSuccess: (note: Confession) => void;
 }) {
-  const [color, setColor]         = useState<NoteColor>("yellow");
-  const [status, setStatus]       = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [errorMsg, setErrorMsg]   = useState("");
+  const [color,    setColor]    = useState<NoteColor>("yellow");
+  const [status,   setStatus]   = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
   const [charCount, setCharCount] = useState(0);
-  const passcodeRef               = useRef<HTMLInputElement>(null);
+  const passcodeRef = useRef<HTMLInputElement>(null);
 
-  // Focus passcode on open
-  useEffect(() => {
-    const t = setTimeout(() => passcodeRef.current?.focus(), 80);
-    return () => clearTimeout(t);
-  }, []);
+  useEffect(() => { setTimeout(() => passcodeRef.current?.focus(), 80); }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setStatus("loading");
     setErrorMsg("");
 
-    const formData = new FormData(e.currentTarget);
-    // Inject color (controlled state, not a form field)
-    formData.set("color", color);
+    const fd = new FormData(e.currentTarget);
+    fd.set("color", color);
 
     try {
-      const result = await postConfessionAction(formData);
-
+      const result = await postConfessionAction(fd);
       if (result?.error) {
-        // Show error IN the modal — user can fix passcode and retry
         setErrorMsg(result.error);
         setStatus("error");
         return;
       }
 
-      // Success — build the confirmed note object and pass it up
-      const content      = (formData.get("content") as string).trim();
-      const confirmedNote: Confession = {
+      const content = (fd.get("content") as string).trim();
+      const newNote: Confession = {
         id:           result.data!.id,
         content,
         color,
-        x_pos:        Math.random() * 560 + 40,
-        y_pos:        Math.random() * 380 + 40,
-        rotation_deg: (Math.random() - 0.5) * 10,
+        x_pos:        0,
+        y_pos:        0,
+        rotation_deg: (Math.random() - 0.5) * 5,
         created_at:   new Date().toISOString(),
       };
 
       setStatus("success");
-      // Brief success flash, then close and add confirmed note to board
-      setTimeout(() => {
-        onSuccess(confirmedNote);
-        onClose();
-      }, 900);
-
+      setTimeout(() => { onSuccess(newNote); onClose(); }, 700);
     } catch {
       setErrorMsg("Koneksi bermasalah. Coba lagi.");
       setStatus("error");
@@ -196,77 +123,56 @@ function PostNoteModal({
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center
                  bg-void/90 backdrop-blur-sm p-4"
       onClick={status === "loading" ? undefined : onClose}
     >
       <motion.div
-        initial={{ y: 60, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 60, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 50, opacity: 0 }}
+        transition={{ type: "spring", stiffness: 320, damping: 30 }}
         className="card-glass w-full max-w-sm p-6 rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-display text-lg text-ink">Tempel Note</h3>
-          <button
-            onClick={onClose}
-            disabled={status === "loading"}
-            className="text-muted hover:text-ink transition-colors disabled:opacity-40"
-          >
+          <button onClick={onClose} disabled={status === "loading"}
+            className="text-muted hover:text-ink transition-colors p-1 rounded-lg
+                       disabled:opacity-40 min-w-[44px] min-h-[44px] flex items-center justify-center">
             <X size={18} />
           </button>
         </div>
 
-        {/* Success state */}
         {status === "success" ? (
-          <div className="text-center py-8">
-            <p className="text-4xl mb-3">📌</p>
-            <p className="font-display text-lg text-gold">Note berhasil ditempel!</p>
+          <div className="text-center py-6">
+            <p className="text-3xl mb-2">📌</p>
+            <p className="font-display text-base text-blue">Note berhasil ditempel!</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-
             {/* Passcode */}
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                PASSCODE *
-              </label>
-              <input
-                ref={passcodeRef}
-                name="passcode"
-                type="password"
-                placeholder="Masukkan passcode kelas"
-                required
-                autoComplete="current-password"
-                className="input-dark"
-              />
+              <label className="block font-mono text-[11px] text-muted mb-1.5">PASSCODE *</label>
+              <input ref={passcodeRef} name="passcode" type="password"
+                placeholder="Passcode kelas" required autoComplete="current-password"
+                className="input-dark" />
             </div>
 
-            {/* Color picker */}
+            {/* Color */}
             <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                WARNA NOTE
-              </label>
+              <label className="block font-mono text-[11px] text-muted mb-2">WARNA NOTE</label>
               <div className="flex gap-2">
                 {COLOR_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setColor(opt.value)}
-                    aria-label={opt.label}
-                    className={`w-8 h-8 rounded-full border-2 transition-all ${
-                      color === opt.value
-                        ? "border-ink scale-110 ring-2 ring-ink/20"
-                        : "border-transparent scale-100"
-                    }`}
-                    style={{ background: opt.preview }}
-                  />
+                  <button key={opt.value} type="button" onClick={() => setColor(opt.value)}
+                    title={opt.label}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-mono transition-all
+                                ${color === opt.value
+                                  ? "ring-2 ring-ink scale-105 font-bold"
+                                  : "opacity-70 hover:opacity-100"}`}
+                    style={{ background: opt.bg, color: opt.text }}>
+                    {opt.label}
+                  </button>
                 ))}
               </div>
             </div>
@@ -274,42 +180,28 @@ function PostNoteModal({
             {/* Content */}
             <div>
               <label className="block font-mono text-[11px] text-muted mb-1.5">
-                TULIS SESUATU *{" "}
+                TULIS *{" "}
                 <span className={charCount > 270 ? "text-coral" : "text-muted"}>
-                  ({charCount}/300)
+                  ({charCount}/50)
                 </span>
               </label>
-              <textarea
-                name="content"
-                required
-                maxLength={300}
-                rows={4}
-                placeholder="Rahasia, roast, atau hal yang pengen lo sampaikan..."
+              <textarea name="content" required maxLength={50} rows={3}
+                placeholder="Curhat, roast, atau hal yang pengen lo sampaikan..."
                 onChange={(e) => setCharCount(e.target.value.length)}
-                className="input-dark resize-none"
-              />
+                className="input-dark resize-none" />
             </div>
 
-            {/* Error message — stays visible so user can fix & retry */}
             {errorMsg && (
-              <div className="flex items-start gap-2 text-coral text-sm
-                              bg-coral/10 rounded-lg px-3 py-2">
-                <span className="mt-0.5 shrink-0">⚠</span>
-                <span>{errorMsg}</span>
+              <div className="flex items-start gap-2 text-coral text-sm bg-coral/10 rounded-lg px-3 py-2">
+                <span>⚠</span><span>{errorMsg}</span>
               </div>
             )}
 
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={status === "loading"}
-              className="btn-gold justify-center disabled:opacity-60"
-            >
-              {status === "loading" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Pin size={14} />
-              )}
+            <button type="submit" disabled={status === "loading"}
+              className="btn-blue justify-center disabled:opacity-60">
+              {status === "loading"
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Pin size={14} />}
               {status === "loading" ? "Posting..." : "Tempel Note"}
             </button>
           </form>
@@ -319,45 +211,38 @@ function PostNoteModal({
   );
 }
 
-// ─── ConfessionBoard (main) ───────────────────────────────────────────────────
+// ─── Main Board ───────────────────────────────────────────────────────────────
 
 export default function ConfessionBoard({
   initialConfessions,
 }: {
   initialConfessions: Confession[];
 }) {
-  const boardRef                 = useRef<HTMLDivElement>(null);
+  const [notes,     setNotes]     = useState<Confession[]>(initialConfessions);
   const [showModal, setShowModal] = useState(false);
-  const [notes, setNotes]         = useState<Confession[]>(initialConfessions);
   const [realtimeOk, setRealtimeOk] = useState<boolean | null>(null);
 
-  // ── Supabase Realtime ──────────────────────────────────────────────────────
+  // ── Realtime subscription ─────────────────────────────────────────────────
   useEffect(() => {
     const supabase = createClient();
-
-    const channel = supabase
+    const channel  = supabase
       .channel("public:confessions")
-      .on(
-        "postgres_changes",
+      .on("postgres_changes",
         { event: "INSERT", schema: "public", table: "confessions" },
         (payload) => {
           const incoming = payload.new as Confession;
           setNotes((prev) => {
-            // Dedup by id
             if (prev.some((n) => n.id === incoming.id)) return prev;
             return [incoming, ...prev];
           });
         }
       )
-      .subscribe((status) => {
-        setRealtimeOk(status === "SUBSCRIBED");
-      });
+      .subscribe((s) => setRealtimeOk(s === "SUBSCRIBED"));
 
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Called from modal on confirmed success — adds the real note (with real id)
-  const handleNoteSuccess = useCallback((note: Confession) => {
+  const handleNewNote = useCallback((note: Confession) => {
     setNotes((prev) => {
       if (prev.some((n) => n.id === note.id)) return prev;
       return [note, ...prev];
@@ -366,88 +251,55 @@ export default function ConfessionBoard({
 
   return (
     <>
-      <div className="relative">
-        {/* ── Toolbar ── */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            {realtimeOk === null && (
-              <span className="font-mono text-[10px] text-muted/60 flex items-center gap-1">
-                <Loader2 size={10} className="animate-spin" /> Connecting…
-              </span>
-            )}
-            {realtimeOk === true && (
-              <span className="font-mono text-[10px] text-gold/60 flex items-center gap-1">
-                <Wifi size={10} /> Live
-              </span>
-            )}
-            {realtimeOk === false && (
-              <span className="font-mono text-[10px] text-coral/60 flex items-center gap-1">
-                <WifiOff size={10} /> Offline
-              </span>
-            )}
-          </div>
-
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setShowModal(true)}
-            className="btn-gold"
-          >
-            <Plus size={16} />
-            Tempel Note
-          </motion.button>
+      {/* ── Header bar ── */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-[11px] text-muted">
+            {notes.length} note{notes.length !== 1 ? "s" : ""}
+          </p>
+          {/* Realtime indicator */}
+          {realtimeOk === true  && <span className="font-mono text-[10px] text-blue/60 flex items-center gap-1"><Wifi size={10} /> Live</span>}
+          {realtimeOk === false && <span className="font-mono text-[10px] text-coral/60 flex items-center gap-1"><WifiOff size={10} /> Offline</span>}
+          {realtimeOk === null  && <span className="font-mono text-[10px] text-muted/50 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Connecting</span>}
         </div>
 
-        {/* ── Board canvas ── */}
-        <motion.div
-          ref={boardRef}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="board-bg relative w-full rounded-2xl border border-border overflow-hidden"
-          style={{ height: "700px", minHeight: "600px" }}
+        <motion.button
+          whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+          onClick={() => setShowModal(true)}
+          className="btn-blue"
         >
-          <div
-            className="absolute inset-0 opacity-[0.025] bg-repeat pointer-events-none"
-            style={{
-              backgroundImage: "radial-gradient(circle, #f5c842 1px, transparent 1px)",
-              backgroundSize: "30px 30px",
-            }}
-          />
-
-          {notes.length === 0 && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center
-                            gap-4 text-center pointer-events-none">
-              <p className="text-4xl">📌</p>
-              <p className="font-display text-xl text-muted">Board masih kosong.</p>
-              <p className="font-body text-sm text-muted/60">
-                Jadi yang pertama tempel note!
-              </p>
-            </div>
-          )}
-
-          <AnimatePresence>
-            {notes.map((c, idx) => (
-              <DraggableNote
-                key={c.id}
-                confession={c}
-                boardRef={boardRef}
-                isNew={idx === 0}
-              />
-            ))}
-          </AnimatePresence>
-        </motion.div>
-
-        <p className="mt-3 font-mono text-[11px] text-muted text-right">
-          {notes.length} notes terpasang
-          {notes.length > 0 && " — drag untuk memindahkan"}
-        </p>
+          <Plus size={15} /> Tempel Note
+        </motion.button>
       </div>
 
+      {/* ── Notes grid — CSS columns masonry, no drag ── */}
+      {notes.length === 0 ? (
+        <div className="flex flex-col items-center py-20 gap-3 text-center">
+          <p className="text-4xl">📌</p>
+          <p className="font-display text-xl text-muted">Board masih kosong.</p>
+          <p className="font-body text-sm text-muted/50">Jadi yang pertama tempel note!</p>
+        </div>
+      ) : (
+        <div
+          className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 gap-3"
+          style={{ columnFill: "balance" }}
+        >
+          <AnimatePresence>
+            {notes.map((note, i) => (
+              <div key={note.id} className="mb-3 break-inside-avoid">
+                <NoteCard note={note} isNew={i === 0} />
+              </div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* ── Post modal ── */}
       <AnimatePresence>
         {showModal && (
-          <PostNoteModal
+          <PostModal
             onClose={() => setShowModal(false)}
-            onSuccess={handleNoteSuccess}
+            onSuccess={handleNewNote}
           />
         )}
       </AnimatePresence>

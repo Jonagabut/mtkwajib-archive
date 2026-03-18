@@ -115,7 +115,7 @@ export default function NavBar({ logoUrl }: { logoUrl: string | null }) {
             : "bg-transparent"
         }`}
       >
-        <div className="container mx-auto px-4 md:px-8 h-16 flex items-center justify-between gap-4">
+        <div className="container mx-auto px-4 md:px-8 h-14 sm:h-16 flex items-center justify-between gap-4">
 
           {/* ── Logo / Brand ── */}
           <div className="flex items-center gap-3 flex-shrink-0">

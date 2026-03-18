@@ -49,7 +49,7 @@ export async function postConfessionAction(
   // Content validation
   const content = (formData.get("content") as string)?.trim();
   if (!content || content.length === 0) return { error: "Tulis sesuatu dulu!" };
-  if (content.length > 300) return { error: "Terlalu panjang. Maksimum 300 karakter." };
+  if (content.length > 50) return { error: "Terlalu panjang. Maksimum 50 karakter." };
 
   // Color validation
   const color = (formData.get("color") as NoteColor) || "yellow";
