@@ -394,7 +394,7 @@ export default function ConfessionBoard({
             if (prev.some((n) => n.id === incoming.id)) return prev;
             return [incoming, ...prev];
           });
-          setNewNoteIds((prev) => new Set([...prev, incoming.id]));
+          setNewNoteIds((prev) => new Set(Array.from(prev).concat(incoming.id)));
           setTimeout(() => {
             setNewNoteIds((prev) => {
               const s = new Set(prev);
@@ -414,7 +414,7 @@ export default function ConfessionBoard({
       if (prev.some((n) => n.id === note.id)) return prev;
       return [note, ...prev];
     });
-    setNewNoteIds((prev) => new Set([...prev, note.id]));
+    setNewNoteIds((prev) => new Set(Array.from(prev).concat(note.id)));
     setTimeout(() => {
       setNewNoteIds((prev) => {
         const s = new Set(prev);
