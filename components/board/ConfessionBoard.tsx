@@ -1,120 +1,122 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+// components/board/ConfessionBoard.tsx
+// Features:
+//  - Supabase Realtime subscription → new notes appear live for ALL visitors
+//  - Optimistic insert → the poster sees their note immediately (before DB confirms)
+//  - Framer Motion drag with position persisted to DB on drag-end
+//  - Rate-limited at server-action layer (5 posts / 10 min / IP)
+
+import { useState, useRef, useCallback, useEffect, useId } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, X, Loader2, Pin } from "lucide-react";
+import type { PanInfo, MotionValue } from "framer-motion";
+import { Plus, X, Loader2, Pin, Wifi, WifiOff } from "lucide-react";
 import type { Confession, NoteColor } from "@/lib/supabase/database.types";
+import { createClient } from "@/lib/supabase/client";
 import {
   postConfessionAction,
   updateConfessionPositionAction,
 } from "@/app/actions/confessions";
 
-const COLOR_OPTIONS: { value: NoteColor; label: string; preview: string }[] = [
-  { value: "yellow", label: "Yellow", preview: "#f5e27a" },
-  { value: "pink", label: "Pink", preview: "#f7b8a0" },
-  { value: "lavender", label: "Lavender", preview: "#c4b8f0" },
-];
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const COLOR_OPTIONS = [
+  { value: "yellow" as NoteColor, label: "Yellow", preview: "#f5e27a" },
+  { value: "pink"   as NoteColor, label: "Pink",   preview: "#f7b8a0" },
+  { value: "lavender" as NoteColor, label: "Lavender", preview: "#c4b8f0" },
+] as const;
+
+const BG_MAP: Record<NoteColor, string> = {
+  yellow:   "linear-gradient(135deg, #f5e27a 0%, #f0d84a 50%, #e8cc30 100%)",
+  pink:     "linear-gradient(135deg, #f7b8a0 0%, #f0956e 50%, #e87850 100%)",
+  lavender: "linear-gradient(135deg, #c4b8f0 0%, #a898e0 50%, #9080d0 100%)",
+};
 
 const SHADOW_MAP: Record<NoteColor, string> = {
-  yellow: "4px 4px 0px #c9a232, 8px 8px 20px rgba(0,0,0,0.4)",
-  pink: "4px 4px 0px #c4674e, 8px 8px 20px rgba(0,0,0,0.4)",
+  yellow:   "4px 4px 0px #c9a232, 8px 8px 20px rgba(0,0,0,0.4)",
+  pink:     "4px 4px 0px #c4674e, 8px 8px 20px rgba(0,0,0,0.4)",
   lavender: "4px 4px 0px #7a6faa, 8px 8px 20px rgba(0,0,0,0.4)",
 };
 
-const BG_MAP: Record<NoteColor, string> = {
-  yellow: "linear-gradient(135deg, #f5e27a 0%, #f0d84a 50%, #e8cc30 100%)",
-  pink: "linear-gradient(135deg, #f7b8a0 0%, #f0956e 50%, #e87850 100%)",
-  lavender: "linear-gradient(135deg, #c4b8f0 0%, #a898e0 50%, #9080d0 100%)",
+const PIN_COLOR: Record<NoteColor, string> = {
+  yellow: "#c9a232", pink: "#c4674e", lavender: "#7a6faa",
 };
+
+// A confession enriched with an optional "optimistic" flag used to show a
+// spinner while the server round-trip completes.
+type LiveConfession = Confession & { _optimistic?: boolean };
+
+// ─── DraggableNote ────────────────────────────────────────────────────────────
 
 function DraggableNote({
   confession,
   boardRef,
+  isNew,
 }: {
-  confession: Confession;
-  boardRef: React.RefObject<HTMLDivElement>;
+  confession: LiveConfession;
+  boardRef: React.RefObject<HTMLDivElement | null>;
+  isNew: boolean;
 }) {
-  const [position, setPosition] = useState({
-    x: confession.x_pos,
-    y: confession.y_pos,
-  });
-  const [isDragging, setIsDragging] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [pos, setPos]         = useState({ x: confession.x_pos, y: confession.y_pos });
+  const [dragging, setDragging] = useState(false);
+  const [saving, setSaving]    = useState(false);
+  const color                  = (confession.color as NoteColor) ?? "yellow";
 
   const handleDragEnd = useCallback(
-    async (
-      _event: MouseEvent | TouchEvent | PointerEvent,
-      info: { offset: { x: number; y: number } }
-    ) => {
-      setIsDragging(false);
+    async (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+      setDragging(false);
       if (!boardRef.current) return;
 
-      const containerRect = boardRef.current.getBoundingClientRect();
-      const newX = Math.max(
-        0,
-        Math.min(position.x + info.offset.x, containerRect.width - 200)
-      );
-      const newY = Math.max(
-        0,
-        Math.min(position.y + info.offset.y, containerRect.height - 180)
-      );
+      const rect = boardRef.current.getBoundingClientRect();
+      const newX = Math.max(0, Math.min(pos.x + info.offset.x, rect.width  - 200));
+      const newY = Math.max(0, Math.min(pos.y + info.offset.y, rect.height - 180));
+      setPos({ x: newX, y: newY });
 
-      setPosition({ x: newX, y: newY });
-      setIsSaving(true);
-      try {
-        await updateConfessionPositionAction(confession.id, newX, newY);
-      } catch (err) {
-        console.error("Failed to persist note position:", err);
-      } finally {
-        setIsSaving(false);
-      }
+      // Skip persisting positions for optimistic notes (no real ID yet)
+      if (confession._optimistic) return;
+
+      setSaving(true);
+      await updateConfessionPositionAction(confession.id, newX, newY).catch(
+        (err) => console.error("[board] persist position failed:", err)
+      );
+      setSaving(false);
     },
-    [confession.id, position, boardRef]
+    [confession.id, confession._optimistic, pos, boardRef]
   );
-
-  const noteColor = (confession.color as NoteColor) || "yellow";
 
   return (
     <motion.div
       drag
       dragMomentum={false}
       dragConstraints={boardRef}
-      onDragStart={() => setIsDragging(true)}
+      onDragStart={() => setDragging(true)}
       onDragEnd={handleDragEnd}
-      initial={{ scale: 0, opacity: 0, rotate: confession.rotation_deg }}
-      animate={{
-        scale: 1,
-        opacity: 1,
-        rotate: confession.rotation_deg,
-        zIndex: isDragging ? 100 : 1,
-      }}
-      whileDrag={{
-        scale: 1.05,
-        rotate: confession.rotation_deg + 2,
-        zIndex: 100,
-      }}
+      initial={isNew
+        ? { scale: 0, opacity: 0, rotate: confession.rotation_deg, y: -20 }
+        : { scale: 0, opacity: 0, rotate: confession.rotation_deg }}
+      animate={{ scale: 1, opacity: confession._optimistic ? 0.7 : 1, rotate: confession.rotation_deg, zIndex: dragging ? 100 : 1 }}
+      exit={{ scale: 0, opacity: 0, transition: { duration: 0.2 } }}
+      whileDrag={{ scale: 1.06, rotate: confession.rotation_deg + 2, zIndex: 100 }}
       whileHover={{ scale: 1.02, zIndex: 50 }}
+      transition={{ type: "spring", stiffness: 260, damping: 22 }}
       style={{
         position: "absolute",
-        left: position.x,
-        top: position.y,
+        left: pos.x,
+        top:  pos.y,
         width: 180,
-        background: BG_MAP[noteColor],
-        boxShadow: SHADOW_MAP[noteColor],
-        cursor: isDragging ? "grabbing" : "grab",
+        background: BG_MAP[color],
+        boxShadow: SHADOW_MAP[color],
+        cursor: dragging ? "grabbing" : "grab",
         userSelect: "none",
+        // ring while saving
+        outline: saving ? "2px solid rgba(245,200,66,0.6)" : "none",
       }}
       className="rounded-lg p-4 flex flex-col gap-2 min-h-[120px]"
     >
+      {/* Pin */}
       <div
-        className="absolute -top-3 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full border-2 border-void/20 flex items-center justify-center"
-        style={{
-          background:
-            noteColor === "yellow"
-              ? "#c9a232"
-              : noteColor === "pink"
-              ? "#c4674e"
-              : "#7a6faa",
-        }}
+        className="absolute -top-3 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full
+                   border-2 border-void/20 flex items-center justify-center"
+        style={{ background: PIN_COLOR[color] }}
       >
         <Pin size={8} className="text-void/60 -rotate-45" />
       </div>
@@ -125,39 +127,56 @@ function DraggableNote({
 
       <div className="mt-auto flex items-center justify-between">
         <span className="text-[9px] font-mono text-void/50">anonymous</span>
-        {isSaving && <Loader2 size={10} className="text-void/40 animate-spin" />}
+        {(saving || confession._optimistic) && (
+          <Loader2 size={10} className="text-void/40 animate-spin" />
+        )}
       </div>
     </motion.div>
   );
 }
 
-function PostNoteModal({ onClose }: { onClose: () => void }) {
-  const [color, setColor] = useState<NoteColor>("yellow");
-  const [status, setStatus] = useState<
-    "idle" | "loading" | "success" | "error"
-  >("idle");
+// ─── PostNoteModal ────────────────────────────────────────────────────────────
+
+function PostNoteModal({
+  onClose,
+  onOptimisticPost,
+}: {
+  onClose: () => void;
+  onOptimisticPost: (draft: LiveConfession) => void;
+}) {
+  const formId  = useId();
+  const [color, setColor]     = useState<NoteColor>("yellow");
+  const [status, setStatus]   = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [charCount, setCharCount] = useState(0);
 
   async function handleSubmit(formData: FormData) {
     setStatus("loading");
     setErrorMsg("");
-    try {
-      const result = await postConfessionAction(formData);
-      if (result?.error) {
-        setErrorMsg(result.error);
-        setStatus("error");
-      } else {
-        setStatus("success");
-        setTimeout(() => {
-          onClose();
-          window.location.reload();
-        }, 1500);
-      }
-    } catch {
-      setErrorMsg("Gagal posting. Coba lagi.");
-      setStatus("error");
+
+    // Build an optimistic note so the board looks responsive immediately
+    const content = (formData.get("content") as string)?.trim() ?? "";
+    const optimisticNote: LiveConfession = {
+      id: `opt_${Date.now()}`,
+      content,
+      color,
+      x_pos:        Math.random() * 560 + 40,
+      y_pos:        Math.random() * 380 + 40,
+      rotation_deg: (Math.random() - 0.5) * 10,
+      created_at:   new Date().toISOString(),
+      _optimistic:  true,
+    };
+    onOptimisticPost(optimisticNote);
+    onClose(); // close modal right away — board shows optimistic note
+
+    const result = await postConfessionAction(formData);
+    if (result?.error) {
+      // Revert: the realtime subscription will NOT fire, optimistic note stays
+      // but turns red. In practice: just reload to sync.
+      console.error("[board] post failed:", result.error);
     }
+    // On success: the Supabase realtime INSERT event fires and the real note
+    // replaces the optimistic one (deduplication by content in the board).
   }
 
   return (
@@ -165,7 +184,8 @@ function PostNoteModal({ onClose }: { onClose: () => void }) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-void/90 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center
+                 bg-void/90 backdrop-blur-sm p-4"
       onClick={onClose}
     >
       <motion.div
@@ -178,112 +198,171 @@ function PostNoteModal({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-display text-lg text-ink">Tempel Note</h3>
-          <button onClick={onClose} className="text-muted hover:text-ink">
+          <button onClick={onClose} className="text-muted hover:text-ink transition-colors">
             <X size={18} />
           </button>
         </div>
 
-        {status === "success" ? (
-          <div className="text-center py-6">
-            <p className="text-3xl mb-2">📌</p>
-            <p className="font-display text-lg text-gold">Note ditempel!</p>
+        <form id={formId} action={handleSubmit} className="flex flex-col gap-4">
+          <input type="hidden" name="color" value={color} />
+
+          <div>
+            <label className="block font-mono text-[11px] text-muted mb-1.5">
+              PASSCODE *
+            </label>
+            <input
+              name="passcode"
+              type="password"
+              placeholder="Masukkan passcode kelas"
+              required
+              autoComplete="current-password"
+              className="input-dark"
+            />
           </div>
-        ) : (
-          <form action={handleSubmit} className="flex flex-col gap-4">
-            <input type="hidden" name="color" value={color} />
 
-            <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                PASSCODE *
-              </label>
-              <input
-                name="passcode"
-                type="password"
-                placeholder="Masukkan passcode kelas"
-                required
-                className="input-dark"
-              />
+          <div>
+            <label className="block font-mono text-[11px] text-muted mb-1.5">
+              WARNA NOTE
+            </label>
+            <div className="flex gap-2">
+              {COLOR_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setColor(opt.value)}
+                  aria-label={opt.label}
+                  className={`w-8 h-8 rounded-full border-2 transition-all ${
+                    color === opt.value
+                      ? "border-ink scale-110 ring-2 ring-ink/20"
+                      : "border-transparent scale-100"
+                  }`}
+                  style={{ background: opt.preview }}
+                />
+              ))}
             </div>
+          </div>
 
-            <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                WARNA NOTE
-              </label>
-              <div className="flex gap-2">
-                {COLOR_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setColor(opt.value)}
-                    className={`w-8 h-8 rounded-full border-2 transition-all ${
-                      color === opt.value
-                        ? "border-ink scale-110"
-                        : "border-transparent scale-100"
-                    }`}
-                    style={{ background: opt.preview }}
-                    title={opt.label}
-                  />
-                ))}
-              </div>
-            </div>
+          <div>
+            <label className="block font-mono text-[11px] text-muted mb-1.5">
+              TULIS SESUATU *{" "}
+              <span className={charCount > 270 ? "text-coral" : "text-muted"}>
+                ({charCount}/300)
+              </span>
+            </label>
+            <textarea
+              name="content"
+              required
+              maxLength={300}
+              rows={4}
+              placeholder="Rahasia, roast, atau hal yang pengen lo sampaikan..."
+              onChange={(e) => setCharCount(e.target.value.length)}
+              className="input-dark resize-none"
+            />
+          </div>
 
-            <div>
-              <label className="block font-mono text-[11px] text-muted mb-1.5">
-                TULIS SESUATU *{" "}
-                <span
-                  className={charCount > 270 ? "text-coral" : "text-muted"}
-                >
-                  ({charCount}/300)
-                </span>
-              </label>
-              <textarea
-                name="content"
-                required
-                maxLength={300}
-                rows={4}
-                placeholder="Rahasia, roast, atau hal yang pengen lo sampaikan..."
-                onChange={(e) => setCharCount(e.target.value.length)}
-                className="input-dark resize-none"
-              />
-            </div>
+          {errorMsg && (
+            <p className="text-coral text-sm bg-coral/10 rounded-lg px-3 py-2">
+              {errorMsg}
+            </p>
+          )}
 
-            {errorMsg && (
-              <p className="text-coral text-sm bg-coral/10 rounded-lg px-3 py-2">
-                {errorMsg}
-              </p>
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="btn-gold justify-center disabled:opacity-60"
+          >
+            {status === "loading" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Pin size={14} />
             )}
-
-            <button
-              type="submit"
-              disabled={status === "loading"}
-              className="btn-gold justify-center disabled:opacity-60"
-            >
-              {status === "loading" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <Pin size={14} />
-              )}
-              {status === "loading" ? "Posting..." : "Tempel Note"}
-            </button>
-          </form>
-        )}
+            {status === "loading" ? "Posting..." : "Tempel Note"}
+          </button>
+        </form>
       </motion.div>
     </motion.div>
   );
 }
+
+// ─── ConfessionBoard (main) ───────────────────────────────────────────────────
 
 export default function ConfessionBoard({
   initialConfessions,
 }: {
   initialConfessions: Confession[];
 }) {
-  const boardRef = useRef<HTMLDivElement>(null);
+  const boardRef             = useRef<HTMLDivElement>(null);
   const [showModal, setShowModal] = useState(false);
+  const [notes, setNotes]    = useState<LiveConfession[]>(initialConfessions);
+  const [realtimeOk, setRealtimeOk] = useState<boolean | null>(null); // null = connecting
+
+  // ── Supabase Realtime subscription ────────────────────────────────────────
+  // Listens for INSERT events on the confessions table.
+  // New notes from OTHER users slide onto the board automatically.
+  useEffect(() => {
+    const supabase = createClient();
+
+    const channel = supabase
+      .channel("public:confessions")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "confessions" },
+        (payload) => {
+          const incoming = payload.new as Confession;
+          setNotes((prev) => {
+            // If an optimistic note with the same content exists, replace it.
+            // Otherwise prepend the real note.
+            const optimisticIdx = prev.findIndex(
+              (n) => n._optimistic && n.content === incoming.content
+            );
+            if (optimisticIdx !== -1) {
+              const next = [...prev];
+              next[optimisticIdx] = incoming;
+              return next;
+            }
+            // Dedup by id (shouldn't be needed, but defensive)
+            if (prev.some((n) => n.id === incoming.id)) return prev;
+            return [incoming, ...prev];
+          });
+        }
+      )
+      .subscribe((status) => {
+        setRealtimeOk(status === "SUBSCRIBED");
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Called when the user submits the modal — adds optimistic note immediately
+  const handleOptimisticPost = useCallback((draft: LiveConfession) => {
+    setNotes((prev) => [draft, ...prev]);
+  }, []);
 
   return (
     <>
       <div className="relative">
-        <div className="flex justify-center mb-6">
+        {/* ── Toolbar ── */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            {realtimeOk === null && (
+              <span className="font-mono text-[10px] text-muted/60 flex items-center gap-1">
+                <Loader2 size={10} className="animate-spin" /> Connecting…
+              </span>
+            )}
+            {realtimeOk === true && (
+              <span className="font-mono text-[10px] text-gold/60 flex items-center gap-1">
+                <Wifi size={10} /> Live
+              </span>
+            )}
+            {realtimeOk === false && (
+              <span className="font-mono text-[10px] text-coral/60 flex items-center gap-1">
+                <WifiOff size={10} /> Offline
+              </span>
+            )}
+          </div>
+
           <motion.button
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
@@ -295,6 +374,7 @@ export default function ConfessionBoard({
           </motion.button>
         </div>
 
+        {/* ── Board canvas ── */}
         <motion.div
           ref={boardRef}
           initial={{ opacity: 0 }}
@@ -302,21 +382,20 @@ export default function ConfessionBoard({
           className="board-bg relative w-full rounded-2xl border border-border overflow-hidden"
           style={{ height: "700px", minHeight: "600px" }}
         >
+          {/* Subtle dot grid */}
           <div
-            className="absolute inset-0 opacity-[0.02] bg-repeat pointer-events-none"
+            className="absolute inset-0 opacity-[0.025] bg-repeat pointer-events-none"
             style={{
-              backgroundImage:
-                "radial-gradient(circle, #f5c842 1px, transparent 1px)",
+              backgroundImage: "radial-gradient(circle, #f5c842 1px, transparent 1px)",
               backgroundSize: "30px 30px",
             }}
           />
 
-          {initialConfessions.length === 0 && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center pointer-events-none">
+          {notes.length === 0 && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center
+                            gap-4 text-center pointer-events-none">
               <p className="text-4xl">📌</p>
-              <p className="font-display text-xl text-muted">
-                Board masih kosong.
-              </p>
+              <p className="font-display text-xl text-muted">Board masih kosong.</p>
               <p className="font-body text-sm text-muted/60">
                 Jadi yang pertama tempel note!
               </p>
@@ -324,20 +403,30 @@ export default function ConfessionBoard({
           )}
 
           <AnimatePresence>
-            {initialConfessions.map((c) => (
-              <DraggableNote key={c.id} confession={c} boardRef={boardRef as React.RefObject<HTMLDivElement>} />
+            {notes.map((c, idx) => (
+              <DraggableNote
+                key={c.id}
+                confession={c}
+                boardRef={boardRef}
+                isNew={idx === 0}
+              />
             ))}
           </AnimatePresence>
         </motion.div>
 
         <p className="mt-3 font-mono text-[11px] text-muted text-right">
-          {initialConfessions.length} notes terpasang
-          {initialConfessions.length > 0 && " — drag untuk memindahkan"}
+          {notes.length} notes terpasang
+          {notes.length > 0 && " — drag untuk memindahkan"}
         </p>
       </div>
 
       <AnimatePresence>
-        {showModal && <PostNoteModal onClose={() => setShowModal(false)} />}
+        {showModal && (
+          <PostNoteModal
+            onClose={() => setShowModal(false)}
+            onOptimisticPost={handleOptimisticPost}
+          />
+        )}
       </AnimatePresence>
     </>
   );

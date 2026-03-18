@@ -8,38 +8,71 @@ import Footer from "@/components/layout/Footer";
 import { createAdminClient } from "@/lib/supabase/server";
 import type { Student, GalleryMedia, Confession } from "@/lib/supabase/database.types";
 
+// ISR: revalidate page data every 60 seconds
 export const revalidate = 60;
 
+// ─── Data fetchers ────────────────────────────────────────────────────────────
+// Each fetcher is independent and swallows its own error so one failed table
+// doesn't take down the whole page — sections just render empty.
+
 async function getStudents(): Promise<Student[]> {
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("students")
-    .select("*")
-    .order("class_number", { ascending: true });
-  return data ?? [];
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("students")
+      .select(
+        "id, name, custom_title, quote, destination, photo_class_url, photo_grad_url, class_number, is_featured, created_at"
+      )
+      .order("class_number", { ascending: true });
+    if (error) throw error;
+    return (data as Student[]) ?? [];
+  } catch (err) {
+    console.error("[page] getStudents failed:", err);
+    return [];
+  }
 }
 
+// Initial gallery load: only newest 24 items — the rest load client-side via
+// the loadMoreMediaAction cursor-pagination action.
 async function getGalleryMedia(): Promise<GalleryMedia[]> {
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("gallery_media")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(80);
-  return data ?? [];
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("gallery_media")
+      .select(
+        "id, storage_path, storage_url, media_type, mime_type, caption, category, uploaded_by, width, height, file_size_bytes, created_at"
+      )
+      .order("created_at", { ascending: false })
+      .limit(24);
+    if (error) throw error;
+    return (data as GalleryMedia[]) ?? [];
+  } catch (err) {
+    console.error("[page] getGalleryMedia failed:", err);
+    return [];
+  }
 }
 
+// Confession board: load most-recent 60 notes for the initial board render.
+// Realtime subscription in ConfessionBoard.tsx appends new notes live.
 async function getConfessions(): Promise<Confession[]> {
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("confessions")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(50);
-  return data ?? [];
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from("confessions")
+      .select("id, content, color, x_pos, y_pos, rotation_deg, created_at")
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (error) throw error;
+    return (data as Confession[]) ?? [];
+  } catch (err) {
+    console.error("[page] getConfessions failed:", err);
+    return [];
+  }
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default async function HomePage() {
+  // All three fetches run in parallel — fastest possible TTFB
   const [students, galleryMedia, confessions] = await Promise.all([
     getStudents(),
     getGalleryMedia(),
@@ -50,10 +83,10 @@ export default async function HomePage() {
     <main className="relative overflow-x-hidden">
       <NavBar />
 
-      {/* Hero */}
+      {/* ── Hero ── */}
       <HeroSection />
 
-      {/* Roster */}
+      {/* ── Warga Kelas ── */}
       <section id="roster" className="relative py-24 bg-surface">
         <div className="absolute inset-0 bg-grid-lines bg-grid opacity-100 pointer-events-none" />
         <div className="container mx-auto px-4 md:px-8 relative z-10">
@@ -70,7 +103,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Gallery */}
+      {/* ── The Archive ── */}
       <section id="gallery" className="relative py-24 bg-void">
         <div className="container mx-auto px-4 md:px-8">
           <div className="mb-14 text-center">
@@ -87,7 +120,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Confession Board */}
+      {/* ── Confession Board ── */}
       <section id="board" className="relative py-24 bg-surface">
         <div className="absolute inset-0 bg-grid-lines bg-grid opacity-100 pointer-events-none" />
         <div className="container mx-auto px-4 md:px-8 relative z-10">
